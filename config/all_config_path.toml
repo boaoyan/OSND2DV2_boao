@@ -1,0 +1,2 @@
+[config_files]
+    default_data_path_config = "config/default_data_path.toml"

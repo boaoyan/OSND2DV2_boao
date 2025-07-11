@@ -1,0 +1,3 @@
+[ct_image]
+    front_img_path = "data/ct_img/x270_y90_z270.png"
+    side_img_path = "data/ct_img/x270_y90_z180.png"
