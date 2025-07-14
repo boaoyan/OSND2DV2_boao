@@ -1,3 +1,8 @@
 [ct_image]
     front_img_path = "data/ct_img/x270_y90_z270.png"
     side_img_path = "data/ct_img/x270_y90_z180.png"
+
+[trans_matrix]
+    a_arm = "data/trans_matrix/spine107/a_arm.npy"
+    rt_ct2o_sz = "data/trans_matrix/spine107/rt_ct2o_sz.npy"
+    rt_ct2o_sc = "data/trans_matrix/spine107/rt_ct2o_sc.npy"
