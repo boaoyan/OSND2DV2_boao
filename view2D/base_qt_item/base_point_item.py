@@ -36,14 +36,17 @@ class BasePointItem(AbstractBaseItem):
         self.item_list: list = self.init_item(item_type)
 
     def init_item(self, item_type):
-        color = None
-        fill_color = None
         if item_type == "pin":
             color = QColor(255, 0, 0)
             fill_color = QColor(255, 0, 0)
         elif item_type == "dire":
             color = QColor(0, 0, 255)
             fill_color = QColor(0, 0, 255)
+        elif item_type == "target":
+            color = QColor(0, 255, 0)
+            fill_color = QColor(0, 255, 0)
+        else:
+            raise ValueError("item_type must be pin, dire or target")
         out_diameter = 6
         in_diameter = 4
         thickness = 0.5

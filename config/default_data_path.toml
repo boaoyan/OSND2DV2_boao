@@ -1,8 +1,51 @@
+# ct_x,ct_y,ct_z此时仍然在物理坐标系下
+balls_pts = "data/balls_pts.csv"
+vox_space = [0.3515625, 0.3515625, 1.0       ]
+
+[robot_arm_param]
+    # 机械臂串口参数
+    port_name = "COM3"
+    baudrate = 115200
+    # 机械臂参数
+    init_a = 2000
+    init_b = 2100
+    reset_a = 3000
+    reset_b = 2500
+    a_threshold = [2000, 4000]
+    b_threshold = [2100, 3000]
+    # 机械臂标定相关
+    cali_a = [2400, 3600]
+    cali_b = [2200, 2800]
+    cali_num = 7
+
+    # 在arm坐标系下的两个点
+    cali_pos_a = [2000, 2000]
+    cali_pos_b = [2200, 2300]
+#    param_toolP = [[42.12897323, -11.61709514, 41.10665843],
+#                   [-37.72925153, 9.58142484, -37.09235042],
+#                   [-34.35872393, 4.68224163, -41.74506213],
+#                   [37.24269127, -3.64779482, 45.67096892 ]]
+#    param_toolP = [[42.12897323, -11.61709514, 41.10665843],
+#                   [-37.72925153, 9.58142484, -37.09235042],
+#                   [37.24269127, -3.64779482, 45.67096892 ],
+#                   [-34.35872393, 4.68224163, -41.74506213],]
+    param_toolP = [[37.94320527,  5.06780067, 44.40407641],
+                   [-36.66520007,  -6.29309517, -42.13093802]]
+    param_R2C = [4.6341918306127985, 66.95422191178551, -518.1065302867709,    0.5803091298116838, 0.8179104349174249, -0.2676898490602819]
+    # sleeve 坐标系到 arm 坐标系的变换
+    param_cz = [0.01432229, 1.23184338]
+
 [ct_image]
     front_img_path = "data/ct_img/x270_y90_z270.png"
     side_img_path = "data/ct_img/x270_y90_z180.png"
+#    front_img_path = "data/ct_img/x0_y90_z90.png"
+#    side_img_path = "data/ct_img/x0_y90_z180.png"
+
+[camera_param]
+    ip = "127.0.0.1"
+    port = 8080
 
 [trans_matrix]
     a_arm = "data/trans_matrix/spine107/a_arm.npy"
-    rt_ct2o_sz = "data/trans_matrix/spine107/rt_ct2o_sz.npy"
+    rt_ct2o_sz = "data/trans_matrix/spine107/rt_ct2o_sz1.npy"
     rt_ct2o_sc = "data/trans_matrix/spine107/rt_ct2o_sc.npy"

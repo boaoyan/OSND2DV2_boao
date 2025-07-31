@@ -6,8 +6,8 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>708</width>
-    <height>542</height>
+    <width>900</width>
+    <height>495</height>
    </rect>
   </property>
   <property name="windowTitle">
@@ -45,8 +45,22 @@
           </size>
          </property>
          <property name="currentIndex">
-          <number>0</number>
+          <number>2</number>
          </property>
+         <widget class="QWidget" name="tab_3">
+          <attribute name="title">
+           <string>标定</string>
+          </attribute>
+          <layout class="QHBoxLayout" name="horizontalLayout_8">
+           <item>
+            <widget class="QPushButton" name="cali_ct2cam_btn">
+             <property name="text">
+              <string>标定体素到相机</string>
+             </property>
+            </widget>
+           </item>
+          </layout>
+         </widget>
          <widget class="QWidget" name="tab">
           <attribute name="title">
            <string>规划</string>
@@ -181,6 +195,76 @@
           <attribute name="title">
            <string>控制</string>
           </attribute>
+          <layout class="QHBoxLayout" name="horizontalLayout_9">
+           <item>
+            <spacer name="horizontalSpacer_14">
+             <property name="orientation">
+              <enum>Qt::Horizontal</enum>
+             </property>
+             <property name="sizeHint" stdset="0">
+              <size>
+               <width>40</width>
+               <height>20</height>
+              </size>
+             </property>
+            </spacer>
+           </item>
+           <item>
+            <widget class="QPushButton" name="connect_arm_btn">
+             <property name="text">
+              <string>连接机械臂</string>
+             </property>
+            </widget>
+           </item>
+           <item>
+            <widget class="QPushButton" name="reset_arm_btn">
+             <property name="text">
+              <string>复位机械臂</string>
+             </property>
+            </widget>
+           </item>
+           <item>
+            <widget class="QPushButton" name="toggle_pin_pos_order_btn">
+             <property name="text">
+              <string>切换针尖针尾</string>
+             </property>
+            </widget>
+           </item>
+           <item>
+            <widget class="QPushButton" name="cali_arm_btn">
+             <property name="text">
+              <string>标定机械臂</string>
+             </property>
+            </widget>
+           </item>
+           <item>
+            <widget class="QPushButton" name="control_to_aim">
+             <property name="text">
+              <string>指向目标</string>
+             </property>
+            </widget>
+           </item>
+           <item>
+            <widget class="QPushButton" name="fix_error_btn">
+             <property name="text">
+              <string>迭代修正</string>
+             </property>
+            </widget>
+           </item>
+           <item>
+            <spacer name="horizontalSpacer_15">
+             <property name="orientation">
+              <enum>Qt::Horizontal</enum>
+             </property>
+             <property name="sizeHint" stdset="0">
+              <size>
+               <width>40</width>
+               <height>20</height>
+              </size>
+             </property>
+            </spacer>
+           </item>
+          </layout>
          </widget>
         </widget>
        </item>
@@ -358,7 +442,7 @@
               </spacer>
              </item>
              <item>
-              <widget class="QLabel" name="ct_pos_label_2">
+              <widget class="QLabel" name="dire_cam_pos_label">
                <property name="text">
                 <string>（0,0,0）</string>
                </property>
@@ -410,7 +494,7 @@
               </spacer>
              </item>
              <item>
-              <widget class="QLabel" name="world_aim_pos_label_2">
+              <widget class="QLabel" name="pin_cam_pos_label">
                <property name="text">
                 <string>（0,0,0）</string>
                </property>
@@ -502,7 +586,7 @@
     <rect>
      <x>0</x>
      <y>0</y>
-     <width>708</width>
+     <width>900</width>
      <height>22</height>
     </rect>
    </property>

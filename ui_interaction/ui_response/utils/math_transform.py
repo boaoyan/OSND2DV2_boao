@@ -129,3 +129,15 @@ def intersection_of_multi_lines(start_points, directions):
     m = np.linalg.inv(np.dot(G.T, G)).dot(G.T).dot(d)
 
     return m[0:dim].flatten()
+
+
+def get_pj_pt(aim_pt, P0, P1):
+    # 计算方向向量
+    direction = P1 - P0
+    length = np.linalg.norm(direction)
+    unit_dir = direction / length
+    # 计算最近点（投影）
+    point_vec = aim_pt - P0
+    t_proj = np.dot(point_vec, unit_dir)
+    closest_point = P0 + t_proj * unit_dir
+    return closest_point

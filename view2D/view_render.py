@@ -3,7 +3,7 @@ from PyQt5.QtCore import Qt, QRectF
 from PyQt5.QtGui import QBrush, QColor, QPixmap
 from PyQt5.QtWidgets import QGraphicsView, QGraphicsScene, QGraphicsPixmapItem, QLabel
 
-from view2D.base_qt_item import BasePointItem, PJLineItem
+from view2D.base_qt_item import BasePointItem, PJLineItem, SingleLineItem
 from view2D.utils import convert_gray_to_qimage
 from view2D.utils.CommunicatedSignal import Communicate
 from view2D.utils.img_processing import apply_circular_mask, darken_image
@@ -50,7 +50,7 @@ class ViewRender:
         self._scene_pos = None
         self._real_uv = None
         self.uv_label = uv_label
-        self.guide_point_item = BasePointItem(self.qt_scene, "pin")
+        self.guide_point_item = BasePointItem(self.qt_scene, "target")
         self.guide_point_item.set_item_visibility(False)
         # 键盘移动点位置
         self.qt_view.keyPressEvent = self.key_press_event
@@ -62,6 +62,12 @@ class ViewRender:
         # 当前状态
         # none: 没有点；point: 有点，没有直线；line: 有点，有直线；both: 有点和投影线
         self.current_status = "none"
+        # section 4 实时显示探针位置
+        self.real_pin_item = BasePointItem(self.qt_scene, "pin")
+        self.real_pin_item.set_item_visibility(False)
+        self.real_dire_item = BasePointItem(self.qt_scene, "dire")
+        self.real_dire_item.set_item_visibility(False)
+        self.real_line_item = SingleLineItem(self.qt_scene)
 
     @property
     def scene_pos(self):
@@ -174,3 +180,16 @@ class ViewRender:
         self.current_status = "none"
         self.guide_point_item.set_item_visibility(False)
         self.pj_line_item.set_item_visibility(False)
+
+    def set_real_pin(self, pin_pos, dire_pos):
+        self.real_pin_item.set_item_pos(pin_pos)
+        self.real_pin_item.set_item_visibility(True)
+        self.real_dire_item.set_item_pos(dire_pos)
+        self.real_dire_item.set_item_visibility(True)
+        self.real_line_item.set_item_pos([pin_pos, dire_pos])
+        self.real_line_item.set_item_visibility(True)
+
+    def hide_real_pin(self):
+        self.real_pin_item.set_item_visibility(False)
+        self.real_dire_item.set_item_visibility(False)
+        self.real_line_item.set_item_visibility(False)

@@ -11,6 +11,7 @@ from PyQt5.QtGui import QColor, QPen
 from .base_line_item import BaseLineItem
 from .utils import draw_line
 
+
 class PathLineItem(BaseLineItem):
     def __init__(self, qt_scene):
         super().__init__(qt_scene)
@@ -22,7 +23,7 @@ class PathLineItem(BaseLineItem):
         line_3 = self.draw_part_of_line("line_3", QColor(0, 0, 255), Qt.PenStyle.DashLine)
         return [line_1, line_2, line_3]
 
-    def draw_part_of_line(self, name:str, color, style):
+    def draw_part_of_line(self, name: str, color, style):
         thickness = 1
         line = draw_line(color, thickness, style)
         self.qt_scene.addItem(line)
@@ -53,5 +54,3 @@ class PathLineItem(BaseLineItem):
             line_props = self._properties[line_name]
             color = color_map[highlight]
             line_item.setPen(QPen(color, line_props["thickness"], line_props["style"]))
-
-
