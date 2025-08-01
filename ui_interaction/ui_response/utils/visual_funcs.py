@@ -98,6 +98,7 @@ def plot_line_and_point(P1, P2, aim_in_cam, extend_ratio=2.0, show_perpendicular
     plt.tight_layout()
     plt.show()
 
+
 def plot_5_points(P0, P1, aim_in_cam, pj_pt, aim_in_cam1, title="5-Point Geometry Visualization"):
     """
     可视化5个点的空间关系：
@@ -171,7 +172,7 @@ def plot_5_points(P0, P1, aim_in_cam, pj_pt, aim_in_cam1, title="5-Point Geometr
     # 设置等比例坐标轴
     all_points = np.array([P0, P1, aim_in_cam, pj_pt, aim_in_cam1, *line_points])
     X, Y, Z = all_points[:, 0], all_points[:, 1], all_points[:, 2]
-    max_range = np.array([X.max()-X.min(), Y.max()-Y.min(), Z.max()-Z.min()]).max() / 2.0
+    max_range = np.array([X.max() - X.min(), Y.max() - Y.min(), Z.max() - Z.min()]).max() / 2.0
     mid_x, mid_y, mid_z = np.mean(X), np.mean(Y), np.mean(Z)
 
     ax.set_xlim(mid_x - max_range, mid_x + max_range)
@@ -181,7 +182,9 @@ def plot_5_points(P0, P1, aim_in_cam, pj_pt, aim_in_cam1, title="5-Point Geometr
     plt.tight_layout()
     plt.show()
 
-def plot_coordinate_frames(rt1, rt2, frame_names=('Frame 1', 'Frame 2'), axis_length=1.0, title="Two Coordinate Frames"):
+
+def plot_coordinate_frames(rt1, rt2, frame_names=('Frame 1', 'Frame 2'), axis_length=1.0,
+                           title="Two Coordinate Frames"):
     """
     绘制两个由 4x4 齐次变换矩阵定义的坐标系
 
@@ -241,8 +244,8 @@ def plot_coordinate_frames(rt1, rt2, frame_names=('Frame 1', 'Frame 2'), axis_le
     all_pts = np.array([origin1, origin2, origin1 + axes1[0], origin1 + axes1[1], origin1 + axes1[2],
                         origin2 + axes2[0], origin2 + axes2[1], origin2 + axes2[2]])
     X, Y, Z = all_pts[:, 0], all_pts[:, 1], all_pts[:, 2]
-    max_range = np.array([X.max()-X.min(), Y.max()-Y.min(), Z.max()-Z.min()]).max() / 2.0
-    mid_x, mid_y, mid_z = (X.max()+X.min())/2, (Y.max()+Y.min())/2, (Z.max()+Z.min())/2
+    max_range = np.array([X.max() - X.min(), Y.max() - Y.min(), Z.max() - Z.min()]).max() / 2.0
+    mid_x, mid_y, mid_z = (X.max() + X.min()) / 2, (Y.max() + Y.min()) / 2, (Z.max() + Z.min()) / 2
 
     ax.set_xlim(mid_x - max_range, mid_x + max_range)
     ax.set_ylim(mid_y - max_range, mid_y + max_range)

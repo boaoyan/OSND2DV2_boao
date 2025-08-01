@@ -121,12 +121,7 @@ class ControlEvent:
                                            f'{real_pin_in_cam[2]:.2f})')
 
     def update_rt_cam2ct(self, rt_ct2cam):
-        # FIXME 更新位姿关系图
         self.rt_cam2ct = np.linalg.inv(rt_ct2cam)
-        # rt_cam2ct = self.rt_cam2ct
-        # rt_cam2ct[:3, 3] = 0
-        # rt1 = np.eye(4)
-        # plot_coordinate_frames(rt1, rt_cam2ct)
         self.update_real_pin()
 
     def update_ui_info(self):

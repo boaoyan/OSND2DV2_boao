@@ -36,10 +36,11 @@ vox_space = [0.3515625, 0.3515625, 1.0       ]
     param_cz = [0.01432229, 1.23184338]
 
 [ct_image]
-    front_img_path = "data/ct_img/x270_y90_z270.png"
+# 标准正位（270,90,-90）
+# 标准侧位（270,90, 180）
+# 投影矩阵的alpha与beta为正
+    front_img_path = "data/ct_img/x270_y90_z-90.png"
     side_img_path = "data/ct_img/x270_y90_z180.png"
-#    front_img_path = "data/ct_img/x0_y90_z90.png"
-#    side_img_path = "data/ct_img/x0_y90_z180.png"
 
 [camera_param]
     ip = "127.0.0.1"
@@ -47,5 +48,5 @@ vox_space = [0.3515625, 0.3515625, 1.0       ]
 
 [trans_matrix]
     a_arm = "data/trans_matrix/spine107/a_arm.npy"
-    rt_ct2o_sz = "data/trans_matrix/spine107/rt_ct2o_sz1.npy"
+    rt_ct2o_sz = "data/trans_matrix/spine107/rt_ct2o_sz.npy"
     rt_ct2o_sc = "data/trans_matrix/spine107/rt_ct2o_sc.npy"

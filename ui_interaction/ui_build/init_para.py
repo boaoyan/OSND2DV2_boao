@@ -23,9 +23,6 @@ class InitPara(InitUILayout):
         self.camera_thread.start()
         # 初始化视图显示窗口
         front_img = cv.imread(self.data_config["ct_image"]["front_img_path"], 0)
-        # FIXME 图片上下左右翻转
-        front_img = cv.flip(front_img, 0)
-        front_img = cv.flip(front_img, 1)
         self.front_view_render = ViewRender(self.front_view, front_img, self.front_uv_label,
                                             self.data_config["trans_matrix"]["rt_ct2o_sz"])
         side_img = cv.imread(self.data_config["ct_image"]["side_img_path"], 0)

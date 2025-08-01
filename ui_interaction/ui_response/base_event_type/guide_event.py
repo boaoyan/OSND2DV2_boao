@@ -1,13 +1,9 @@
 import numpy as np
-from PyQt5.QtWidgets import QPushButton, QLabel, QFileDialog
+from PyQt5.QtWidgets import QPushButton, QLabel
 
-from robot_arm.utils.cali_utils import transform_points
 from ui_interaction.ui_build.CompositeControl.message_box import messageBox
-from ui_interaction.ui_response.base_event_type.control_event import transform_point
 from ui_interaction.ui_response.utils.math_transform import get_line, get_coord_in_ct, get_pixel_from_ct
-from ui_interaction.ui_response.utils.registration_algorithm import compute_4x4_transform, kabsch, \
-    find_3d_affine_transform, kabsch_numpy
-from ui_interaction.ui_response.utils.visual_funcs import plot_coordinate_frames
+from ui_interaction.ui_response.utils.registration_algorithm import kabsch_numpy
 from view2D.view_manager import ViewerManager
 from view2D.view_render import ViewRender
 
@@ -180,21 +176,5 @@ class GuideEvent:
                                           f'{self.current_ct_coords[2]:.2f})')
 
     def update_rt_ct2cam(self, balls_in_cam):
-        # FIXME 坐标可视化
-        R, t, rmsd = kabsch_numpy(self.balls_in_ct, balls_in_cam)
-        # t = np.array([3.18421262021535, 118.416172204012, 457.157934662912])
-        self.rt_ct2cam = np.eye(4)
-        self.rt_ct2cam[:3, :3] = R
-        self.rt_ct2cam[:3, 3] = t
-        balls_in_cam2 = transform_points(self.rt_ct2cam, self.balls_in_ct)
-        res1 = self.rt_ct2cam @ np.array([59, 74, -14, 1])
-        res2 = self.rt_ct2cam @ np.array([500, 0, 0, 1])
-        # rt_ct2cam = self.rt_ct2cam
-        # rt_ct2cam[:3, 3] = 0
-        # rt1 = np.eye(4)
-        # plot_coordinate_frames(rt1, rt_ct2cam)
-        # self.rt_ct2cam = find_3d_affine_transform(self.balls_in_ct, balls_in_cam)
-        # self.rt_ct2cam, _, _ = kabsch(self.balls_in_ct, balls_in_cam)
-        # self.rt_ct2cam = np.linalg.inv(self.rt_ct2cam)
-        # print("update_rt_ct2cam\n", self.rt_ct2cam)
+        self.rt_ct2cam = kabsch_numpy(self.balls_in_ct, balls_in_cam)
         self.update_guide_pos_in_cam()

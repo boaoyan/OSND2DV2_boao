@@ -7,7 +7,7 @@ from robot_arm.utils.iterate_move_control import IterateMoveControl
 from robot_arm.utils.move_to_aim import goto_test
 from robot_arm.utils.serial_utils import print_available_ports
 from robot_arm.utils.tool_to_arm import get_tool2arm_rt
-from ui_interaction.ui_response.utils.registration_algorithm import compute_4x4_transform
+from ui_interaction.ui_response.utils.registration_algorithm import kabsch_numpy
 
 
 class RobotArmControl(QThread):
@@ -111,7 +111,7 @@ class RobotArmControl(QThread):
     def cali(self):
         balls_in_arm = np.array(self.balls_in_arm)
         balls_in_cam = np.array(self.balls_in_cam)
-        self.rt_arm2cam = compute_4x4_transform(balls_in_arm, balls_in_cam)
+        self.rt_arm2cam = kabsch_numpy(balls_in_arm, balls_in_cam)
         print("成功标定相机位置")
         print(self.rt_arm2cam)
         self.iterate_move_control.rt_arm2cam = self.rt_arm2cam
