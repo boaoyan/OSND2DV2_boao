@@ -10,3 +10,4 @@ class Communicate(QObject):
     mouse_enter_signal = pyqtSignal(object)  # 当鼠标进入某个视图时，发出该信号，将进入的视图实例传递
     mouse_leave_signal = pyqtSignal(object)  # 当鼠标离开某个视图时，发出该信号，将离开的视图实例传递
     key_pressed_signal = pyqtSignal(object, QKeyEvent)  # 当按下某个键盘按键时，发出该信号，将该视图实例和按下的键盘按键传递
+    str_update_signal = pyqtSignal(str)

@@ -1,3 +1,4 @@
+import numpy as np
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QColor, QPen
 from PyQt5.QtWidgets import QGraphicsLineItem
@@ -23,8 +24,18 @@ class SingleLineItem(BaseLineItem):
 
     def set_item_pos(self, item_pos: list):
         start_pt, end_pt = item_pos
+
+        direction = start_pt - end_pt
+        if np.linalg.norm(direction) < 1e-8:
+            # 两点重合，无法定义方向
+            return start_pt, end_pt
+        direction = direction / np.linalg.norm(direction)
+        ext1 = start_pt + direction * 10000
+        ext2 = end_pt - direction * 10000
+
         self.line_item.setPen(QPen(self.properties["color"], self.properties["thickness"], self.properties["style"]))
-        self.line_item.setLine(start_pt[0], start_pt[1], end_pt[0], end_pt[1])
+        # self.line_item.setLine(start_pt[0], start_pt[1], end_pt[0], end_pt[1])
+        self.line_item.setLine(ext1[0], ext1[1], ext2[0], ext2[1])
 
     def set_item_visibility(self, visible: bool):
         self.line_item.setVisible(visible)

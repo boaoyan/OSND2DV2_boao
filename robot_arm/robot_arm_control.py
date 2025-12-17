@@ -4,7 +4,7 @@ from PyQt5.QtSerialPort import QSerialPort
 
 from robot_arm.utils.cali_utils import display_cali_result, transform_points
 from robot_arm.utils.iterate_move_control import IterateMoveControl
-from robot_arm.utils.move_to_aim import goto_test
+
 from robot_arm.utils.serial_utils import print_available_ports
 from robot_arm.utils.tool_to_arm import get_tool2arm_rt
 from ui_interaction.ui_response.utils.registration_algorithm import kabsch_numpy
@@ -46,6 +46,10 @@ class RobotArmControl(QThread):
         self.cali_b_sequence = np.linspace(cali_b[0], cali_b[1], cali_num)
         self.current_cali_pos_index = 0
         self.rt_arm2cam = None
+        self.previous_optimal_a = None
+        self.previous_optimal_b = None
+        self.true_previous_a = None
+        self.true_previous_b = None
         self.balls_in_arm = []
         self.balls_in_cam = []
         # 测试运动控制
@@ -134,10 +138,12 @@ class RobotArmControl(QThread):
                 a_pos = lines[0].strip()
                 b_pos = lines[1].strip()
                 print("机械臂实际位置：", a_pos, b_pos)
-                a_pos = (float(a_pos) / 2048) * np.pi
-                b_pos = (float(b_pos) / 2048) * np.pi
-                tool2arm_rt = get_tool2arm_rt(a_pos, b_pos, self.param_cz)
-                arm_pos = transform_points(tool2arm_rt, self.param_toolP)
+                a_pos = ((float(a_pos) - self.init_a) / 2048) * np.pi
+                b_pos = ((float(b_pos) - self.init_b) / 2048) * np.pi
+                tool2arm_r, tool2arm_t = get_tool2arm_rt(a_pos, b_pos, self.param_cz)
+                param_toolP = self.param_toolP.T
+                arm_pos = tool2arm_r @ param_toolP + tool2arm_t
+                arm_pos = arm_pos.T
                 self.balls_in_arm.append(arm_pos[0])
                 self.balls_in_arm.append(arm_pos[1])
             else:
@@ -146,6 +152,8 @@ class RobotArmControl(QThread):
             print("电机位置：超时或无响应")
 
     def control_to_aim(self, aim_in_cam):
+        self.true_previous_a = self.previous_optimal_a
+        self.true_previous_b = self.previous_optimal_b
         print("目标点", aim_in_cam)
         # a_sol, b_sol = goto(self.param_toolP, self.param_cz,
         #                     np.linalg.inv(self.rt_arm2cam), aim_in_cam[:3])
@@ -155,7 +163,11 @@ class RobotArmControl(QThread):
         # b = round(((b_sol % (2 * np.pi)) / np.pi) * 2048)
         # a += self.init_a
         # b += self.init_b
-        x0 = [self.reset_a, self.reset_b]
+        x0 = [self.init_a, self.init_b]
         optimal_a, optimal_b = self.iterate_move_control.control_to_aim(aim_in_cam, x0)
         print("最优解", optimal_a, optimal_b)
         self.move(optimal_a, optimal_b)
+        self.previous_optimal_a = optimal_a
+        self.previous_optimal_b = optimal_b
+
+

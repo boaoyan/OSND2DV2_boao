@@ -7,6 +7,7 @@ from ui_interaction.ui_build.init_para import InitPara
 class EventHandler(InitPara):
     def __init__(self):
         super().__init__()
+
         # 更新体素到相机的矩阵
         self.cali_ct2cam_btn.clicked.connect(self.update_rt_ct2cam)
         self.front_view_render.signal.widget_clicked.connect(self.update_activated_view)
@@ -52,6 +53,8 @@ class EventHandler(InitPara):
 
         if file_name:
             self.guide_event.load_planning(file_name)
+
+
 
     def update_rt_ct2cam(self):
         if self.camera_thread.ct_balls_in_cam is None:

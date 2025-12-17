@@ -1,5 +1,7 @@
 import numpy as np
 
+from robot_arm.utils.cali_utils import transform_points
+
 
 # 已知A图中一个像素点的位置，求解其在B图的直线
 def get_line(u, v, rt_ct2o_s1, rt_ct2o_s2, a_arm, a_inv, L=800):
@@ -82,6 +84,20 @@ def get_pixel_from_ct(ct_point, rt_ct2o_s1, rt_ct2o_s2, a_arm):
 
     return np.array([u1, v1]), np.array([u2, v2])
 
+def get_point_in_ct(u, v, rt_ct2o, a_inv, L=800):
+
+    rt_o2ct = np.linalg.inv(rt_ct2o)
+    # 假设光源零点
+    o_source = np.zeros(3)
+    # 从光源坐标到CT体素坐标
+    oct_source = rt_o2ct @ np.append(o_source, 1).T
+    # 从像素坐标到各自的光源坐标
+    pot = a_inv @ np.array([L * u, L * v, L]).T
+    # 从各自的光源坐标统一到CT体素坐标
+    pct = rt_o2ct @ np.append(pot, 1).T
+
+    return oct_source[:3], pct[:3]
+
 
 def get_coord_in_ct(uv1, uv2, rt_ct2o_sz, rt_ct2o_sc, a_inv, L=800):
     u1, v1 = uv1
@@ -106,6 +122,82 @@ def get_coord_in_ct(uv1, uv2, rt_ct2o_sz, rt_ct2o_sc, a_inv, L=800):
     res = intersection_of_multi_lines(np.array([pct_sz[:3], pct_sc[:3]]), np.array([d1[:3], d2[:3]]))
     return res[:3]
 
+
+def get_origin_sz_in_body(rt_o2tool_sz, rt_tool2cam_sz, rt_body2cam_sz):
+    rt_o2cam_sz = rt_tool2cam_sz @ rt_o2tool_sz
+    rt_cam2body_sz = np.linalg.inv(rt_body2cam_sz)
+    rt_o2body_sz = rt_cam2body_sz @ rt_o2cam_sz
+    return rt_o2body_sz
+
+
+def get_origin_sc_in_body(rt_o2tool_sc, rt_tool2cam_sc, rt_body2cam_sc):
+    rt_o2cam_sc = rt_tool2cam_sc @ rt_o2tool_sc
+    rt_cam2body_sc = np.linalg.inv(rt_body2cam_sc)
+    rt_o2body_sc = rt_cam2body_sc @ rt_o2cam_sc
+    return rt_o2body_sc
+
+def get_bodysz2bodysc(rt_body2cam_sz, rt_body2cam_sc):
+    rt_cam2body_sc = np.linalg.inv(rt_body2cam_sc)
+    rt_bodysz2bodysc = rt_cam2body_sc @ rt_body2cam_sz
+    return rt_bodysz2bodysc
+
+def get_coord_in_ct_updata(uv1, uv2, rt_o2body_sz, rt_o2body_sc, rt_bodysz2bodysc, a_inv, L=800):
+    u1, v1 = uv1
+    u2, v2 = uv2
+    # 假设所有的光源零点
+    o_source_sz = np.zeros(3)
+    o_source_sc = np.zeros(3)
+    # 从光源坐标到人体模版坐标
+    oct_source_sz = rt_o2body_sz @ np.append(o_source_sz, 1).T
+    oct_source_sz_update = rt_bodysz2bodysc @ np.append(oct_source_sz)
+    oct_source_sc = rt_o2body_sc @ np.append(o_source_sc, 1).T
+    # 从像素坐标到各自的光源坐标
+    pot_sz = a_inv @ np.array([L * u1, L * v1, L]).T
+    pot_sc = a_inv @ np.array([L * u2, L * v2, L]).T
+    # 从各自的光源坐标统一到CT体素坐标
+    pct_sz = rt_o2body_sz @ np.append(pot_sz, 1).T
+    pct_sz_updata = rt_bodysz2bodysc @ np.append(pct_sz)
+    pct_sc = rt_o2body_sc @ np.append(pot_sc, 1).T
+    # 已知空间中的两条线，求一个点到两条线的距离最短
+    d1 = pct_sz_updata - oct_source_sz_update
+    d2 = pct_sc - oct_source_sc
+    res = intersection_of_multi_lines(np.array([pct_sz[:3], pct_sc[:3]]), np.array([d1[:3], d2[:3]]))
+    return res[:3]
+
+def get_coord_in_ct_updata_new(uv1, uv2, rt_ct2o_sz, rt_ct2o_sc, a_inv, L=800):
+    u1, v1 = uv1
+    u2, v2 = uv2
+    rt_tool2body_sz = np.array([[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]])
+    rt_tool2body_sc = np.array([[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]])
+    rt_offset = np.array([[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]])
+    rt_osz2osc = rt_ct2o_sc @ np.linalg.inv(rt_ct2o_sz)
+    rt_body2o_sz = rt_ct2o_sz
+    rt_body2o_sc = rt_ct2o_sc @ rt_offset
+    rt_o2tool_sz = np.linalg.inv(rt_body2o_sz @ rt_tool2body_sz)
+    rt_o2tool_sc = np.linalg.inv(rt_body2o_sc @ rt_tool2body_sc)
+
+    rt_o2body_sz = rt_tool2body_sz @ rt_o2tool_sz
+    rt_o2body_sc = rt_tool2body_sc @ rt_o2tool_sc
+    rt_bodysz2bodysc = rt_o2body_sc @ rt_osz2osc @ np.linalg.inv(rt_o2body_sz)
+    # 假设所有的光源零点
+    o_source_sz = np.zeros(3)
+    o_source_sc = np.zeros(3)
+    # 从光源坐标到人体模版坐标
+    oct_source_sz = rt_o2body_sz @ np.append(o_source_sz, 1).T
+    oct_source_sz_update = rt_bodysz2bodysc @ np.append(oct_source_sz)
+    oct_source_sc = rt_o2body_sc @ np.append(o_source_sc, 1).T
+    # 从像素坐标到各自的光源坐标
+    pot_sz = a_inv @ np.array([L * u1, L * v1, L]).T
+    pot_sc = a_inv @ np.array([L * u2, L * v2, L]).T
+    # 从各自的光源坐标统一到CT体素坐标
+    pct_sz = rt_o2body_sz @ np.append(pot_sz, 1).T
+    pct_sz_updata = rt_bodysz2bodysc @ np.append(pct_sz)
+    pct_sc = rt_o2body_sc @ np.append(pot_sc, 1).T
+    # 已知空间中的两条线，求一个点到两条线的距离最短
+    d1 = pct_sz_updata - oct_source_sz_update
+    d2 = pct_sc - oct_source_sc
+    res = intersection_of_multi_lines(np.array([pct_sz[:3], pct_sc[:3]]), np.array([d1[:3], d2[:3]]))
+    return res[:3]
 
 def intersection_of_multi_lines(start_points, directions):
     '''

@@ -6,8 +6,8 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>900</width>
-    <height>495</height>
+    <width>981</width>
+    <height>543</height>
    </rect>
   </property>
   <property name="windowTitle">
@@ -45,7 +45,7 @@
           </size>
          </property>
          <property name="currentIndex">
-          <number>2</number>
+          <number>1</number>
          </property>
          <widget class="QWidget" name="tab_3">
           <attribute name="title">
@@ -576,6 +576,19 @@
          </property>
         </widget>
        </item>
+       <item>
+        <widget class="QWidget" name="voxel_view" native="true">
+         <property name="enabled">
+          <bool>true</bool>
+         </property>
+         <property name="sizePolicy">
+          <sizepolicy hsizetype="Preferred" vsizetype="Preferred">
+           <horstretch>20</horstretch>
+           <verstretch>0</verstretch>
+          </sizepolicy>
+         </property>
+        </widget>
+       </item>
       </layout>
      </widget>
     </item>
@@ -586,8 +599,8 @@
     <rect>
      <x>0</x>
      <y>0</y>
-     <width>900</width>
-     <height>22</height>
+     <width>981</width>
+     <height>23</height>
     </rect>
    </property>
    <widget class="QMenu" name="menu">
@@ -596,6 +609,7 @@
     </property>
     <addaction name="save_nav_pos_action"/>
     <addaction name="load_nav_pos_action"/>
+    <addaction name="load_voxel_view_action"/>
    </widget>
    <addaction name="menu"/>
   </widget>
@@ -618,6 +632,11 @@
   <action name="load_side_img_action">
    <property name="text">
     <string>导入侧视图</string>
+   </property>
+  </action>
+  <action name="load_voxel_view_action">
+   <property name="text">
+    <string>导入</string>
    </property>
   </action>
  </widget>

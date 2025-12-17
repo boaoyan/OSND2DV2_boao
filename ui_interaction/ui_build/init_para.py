@@ -4,12 +4,15 @@ from PyQt5.QtCore import QTimer
 
 from camera_communication.get_cam_data import UdpReceiverThread
 from ui_interaction.ui_build.init_layout import InitUILayout
+from ui_interaction.ui_build.voxel_widget_build.voxel_load_widget import VoxelLoadClipWidget
 from ui_interaction.ui_response.base_event_type.control_event import ControlEvent
 from ui_interaction.ui_response.base_event_type.guide_event import GuideEvent
 from view2D.view_manager import ViewerManager
 from view2D.view_render import ViewRender
 from config import ConfigManager
 import cv2 as cv
+
+
 
 
 class InitPara(InitUILayout):
@@ -21,6 +24,10 @@ class InitPara(InitUILayout):
         self.camera_thread = UdpReceiverThread(self.data_config["camera_param"]["ip"],
                                                self.data_config["camera_param"]["port"])
         self.camera_thread.start()
+        # 初始化脊柱3D图像
+        voxel_path = self.data_config["vox_image"]["vox_img_path"]
+        self.voxel_load_clip_ui = VoxelLoadClipWidget(self.voxel_view, voxel_path)
+
         # 初始化视图显示窗口
         front_img = cv.imread(self.data_config["ct_image"]["front_img_path"], 0)
         self.front_view_render = ViewRender(self.front_view, front_img, self.front_uv_label,
@@ -31,11 +38,13 @@ class InitPara(InitUILayout):
         self.view_manager = ViewerManager()
         self.view_manager.viewers.append(self.front_view_render)
         self.view_manager.viewers.append(self.side_view_render)
+
         # 添加事件处理
         balls_pts = pd.read_csv(self.data_config["balls_pts"])
         balls_in_ct = balls_pts[["ct_x", "ct_y", "ct_z"]].values
         vox_space = self.data_config["vox_space"]
         guide_event_params = {
+            "init_para": self,
             "view_manager": self.view_manager,
             "sz_view_render": self.front_view_render,
             "sc_view_render": self.side_view_render,
@@ -51,6 +60,7 @@ class InitPara(InitUILayout):
         self.guide_event = GuideEvent(**guide_event_params)
         # 控制机械臂相关类
         control_event_params = {
+            "init_para": self,
             "a_arm": self.data_config["trans_matrix"]["a_arm"],
             "sz_view_render": self.front_view_render,
             "sc_view_render": self.side_view_render,
@@ -66,5 +76,6 @@ class InitPara(InitUILayout):
             "fix_error_btn": self.fix_error_btn,
             "cali_wait_timer": QTimer(self),
             "result_visual_timer": QTimer(self),
+            "result_judge_timer": QTimer(self),
         }
         self.control_event = ControlEvent(**control_event_params)

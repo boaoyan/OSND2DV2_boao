@@ -2,17 +2,19 @@ import numpy as np
 from PyQt5.QtWidgets import QPushButton, QLabel
 
 from ui_interaction.ui_build.CompositeControl.message_box import messageBox
-from ui_interaction.ui_response.utils.math_transform import get_line, get_coord_in_ct, get_pixel_from_ct
+from ui_interaction.ui_response.utils.math_transform import get_line, get_coord_in_ct, get_pixel_from_ct, \
+    get_point_in_ct
 from ui_interaction.ui_response.utils.registration_algorithm import kabsch_numpy
 from view2D.view_manager import ViewerManager
 from view2D.view_render import ViewRender
 
 
 class GuideEvent:
-    def __init__(self, view_manager: ViewerManager,
+    def __init__(self, init_para, view_manager: ViewerManager,
                  start_gui_btn: QPushButton, finish_gui_btn: QPushButton, cancel_gui_btn: QPushButton,
                  a_arm: str, sz_view_render: ViewRender, sc_view_render: ViewRender,
                  ct_pos_label: QLabel, world_aim_pos_label: QLabel, balls_in_ct, vox_space):
+        self.voxel_load_clip_ui = init_para.voxel_load_clip_ui
         self.view_manager = view_manager
         self.sz_view_render = sz_view_render
         self.sc_view_render = sc_view_render
@@ -98,6 +100,7 @@ class GuideEvent:
 
     def start_plan(self):
         """激活“规划中”状态"""
+        self.voxel_load_clip_ui.clear_all_guide_lines()
         self.is_planning = True
         self.cancel_gui_btn.setEnabled(True)
         self.reset_plan_views()
@@ -147,9 +150,13 @@ class GuideEvent:
         if activated_view is self.sz_view_render:
             src_view = self.sz_view_render
             dst_view = self.sc_view_render
+            view_type = 'sz'
+            line_color = 'red'
         elif activated_view is self.sc_view_render:
             src_view = self.sc_view_render
             dst_view = self.sz_view_render
+            view_type = 'sc'
+            line_color = 'blue'
         else:
             return  # 激活的不是已知视图，不处理
 
@@ -158,6 +165,8 @@ class GuideEvent:
             return  # 没有有效坐标，不处理
 
         u, v = uv
+        oct_source, pot = get_point_in_ct(u, v, src_view.rt_ct2o, self.a_inv, self.L)
+        self.voxel_load_clip_ui.show_line_in_ct(oct_source, pot, view_type, line_color)
         slope, intercept = get_line(u, v,
                                     src_view.rt_ct2o, dst_view.rt_ct2o,
                                     self.a_arm, self.a_inv, self.L)
@@ -170,6 +179,7 @@ class GuideEvent:
                                                      self.sc_view_render.rt_ct2o,
                                                      self.a_inv,
                                                      self.L)
+            self.voxel_load_clip_ui.show_selected_point(self.current_ct_coords)
             if self.current_ct_coords is not None:
                 self.ct_pos_label.setText(f'({self.current_ct_coords[0]:.2f}, '
                                           f'{self.current_ct_coords[1]:.2f}, '

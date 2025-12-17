@@ -27,19 +27,25 @@ class IterateMoveControl:
         self.b_threshold = config['b_threshold']
         self.param_toolP = np.array(config['param_toolP'])
         self.param_cz = np.array(config['param_cz'])
+        self.init_a = config['init_a']
+        self.init_b = config['init_b']
         self.rt_arm2cam = None
 
     def objective(self, x, aim_in_cam):
         a_pos, b_pos = x
-        a_pos = (float(a_pos) / 2048) * np.pi
-        b_pos = (float(b_pos) / 2048) * np.pi
+        a_pos = ((float(a_pos) - self.init_a) / 2048) * np.pi
+        b_pos = ((float(b_pos) - self.init_b) / 2048) * np.pi
 
         # Step 1: 计算 toolP 在 arm 坐标系下的位置
-        tool2arm_rt = get_tool2arm_rt(a_pos, b_pos, self.param_cz)
-        ball_in_arm = transform_points(tool2arm_rt, self.param_toolP)  # (2,3)
+        tool2arm_r, tool2arm_t = get_tool2arm_rt(a_pos, b_pos, self.param_cz)
+        param_toolP = self.param_toolP.T
+        ball_in_arm = tool2arm_r @ param_toolP + tool2arm_t
 
         # Step 2: 变换到相机坐标系
-        ball_in_cam = transform_points(self.rt_arm2cam, ball_in_arm)  # (2,3)
+        arm2cam_r = self.rt_arm2cam[:3, :3]
+        arm2cam_t = self.rt_arm2cam[:3, 3].reshape(3, 1)
+        ball_in_cam = arm2cam_r @ ball_in_arm + arm2cam_t # (2,3)
+        ball_in_cam = ball_in_cam.T
         P1, P2 = ball_in_cam[0], ball_in_cam[1]
 
         # Step 3: 计算 aim_in_cam 到直线 P1-P2 的距离

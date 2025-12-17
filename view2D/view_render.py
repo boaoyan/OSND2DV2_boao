@@ -1,7 +1,7 @@
 import numpy as np
 from PyQt5.QtCore import Qt, QRectF
 from PyQt5.QtGui import QBrush, QColor, QPixmap
-from PyQt5.QtWidgets import QGraphicsView, QGraphicsScene, QGraphicsPixmapItem, QLabel
+from PyQt5.QtWidgets import QGraphicsView, QGraphicsScene, QGraphicsPixmapItem, QLabel, QSizePolicy
 
 from view2D.base_qt_item import BasePointItem, PJLineItem, SingleLineItem
 from view2D.utils import convert_gray_to_qimage
@@ -34,6 +34,8 @@ class ViewRender:
         self.qt_view = qt_view
         self.qt_view.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.qt_view.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.qt_view.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        self.qt_view.setFixedSize(400, 400)  # 强烈建议同时设置固定大小
         # section 1 在控件中添加场景
         self.qt_scene = QGraphicsScene()
         self.qt_view.setScene(self.qt_scene)
@@ -56,6 +58,7 @@ class ViewRender:
         self.qt_view.keyPressEvent = self.key_press_event
         # CT坐标系到光源坐标系的转换关系
         self.rt_ct2o = np.load(rt_ct2o)
+        print("加载的转换矩阵为：", self.rt_ct2o)
         # 绘制投影线
         self.pj_line_item = PJLineItem(self.qt_scene)
         self.slope, self.intercept = None, None

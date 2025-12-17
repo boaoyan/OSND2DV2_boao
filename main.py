@@ -20,6 +20,6 @@ if __name__ == '__main__':
         app = QApplication(sys.argv)
         pinWidget = QRobotControlWidget()
         # 设置窗口的初始大小
-        pinWidget.resize(1600, 1200)
+        pinWidget.resize(900, 600)
         pinWidget.show()
         sys.exit(app.exec())

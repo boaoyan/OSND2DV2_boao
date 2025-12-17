@@ -20,7 +20,9 @@ class UdpReceiverThread(QThread):
         self.ct_balls_in_cam = None
         self.pin_order_flipped = False  # False: 正常顺序；True: 交换顺序
         self._pin_balls_in_cam = None
-
+        # 新增：存储上一次的有效平均值，用于变化检测
+        self._last_ct_avg = None  # shape (4,)
+        self._last_pin_avg = None  # shape (2, 3)
         # 缓冲区：使用 deque 自动维护长度
         self.ct_buffer = deque(maxlen=self.n_average)
         self.pin_buffer = deque(maxlen=self.n_average)
@@ -127,15 +129,43 @@ class UdpReceiverThread(QThread):
                 self.pin_buffer.append(np.array(pin_data))
                 updated = True
 
-        # 当缓冲区有数据时，触发刷新
-        if updated and (len(self.ct_buffer) > 0 or len(self.pin_buffer) > 0):
-            # 计算平均值
-            if len(self.ct_buffer) >= 1:
-                self.ct_balls_in_cam = np.mean(self.ct_buffer, axis=0)
-            if len(self.pin_buffer) >= 1:
-                self._pin_balls_in_cam = np.mean(self.pin_buffer, axis=0)
+        # --- 新增：变化检测逻辑 ---
+        need_refresh = False
+        # 处理 CT 球
+        if len(self.ct_buffer) >= 1:
+            new_ct_avg = np.mean(self.ct_buffer, axis=0)  # shape (4,)
+            if self._last_ct_avg is None:
+                # 首次更新，直接接受
+                self.ct_balls_in_cam = new_ct_avg
+                self._last_ct_avg = new_ct_avg.copy()
+                need_refresh = True
+            else:
+                # 仅比较前3维（位置）
+                dist = np.linalg.norm(new_ct_avg[:3] - self._last_ct_avg[:3])
+                if dist > 0.2:
+                    self.ct_balls_in_cam = new_ct_avg
+                    self._last_ct_avg = new_ct_avg.copy()
+                    need_refresh = True
 
+        # 当缓冲区有数据时，触发刷新
+        if len(self.pin_buffer) >= 1:
+            new_pin_avg = np.mean(self.pin_buffer, axis=0)  # shape (2, 3)
+            if self._last_pin_avg is None:
+                self._pin_balls_in_cam = new_pin_avg
+                self._last_pin_avg = new_pin_avg.copy()
+                need_refresh = True
+            else:
+                # 计算整体欧氏距离（Frobenius 范数）
+                dist = np.linalg.norm(new_pin_avg - self._last_pin_avg)
+                if dist > 0.2:
+                    self._pin_balls_in_cam = new_pin_avg
+                    self._last_pin_avg = new_pin_avg.copy()
+                    need_refresh = True
+                # else: 不更新
+
+        if need_refresh:
             self.data_refreshed.emit()
+
 
     def set_n_average(self, n):
         """动态设置平均次数 N"""

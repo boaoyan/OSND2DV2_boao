@@ -35,7 +35,7 @@ def transform_point(rt_matrix, point):
 
 
 class ControlEvent:
-    def __init__(self, a_arm: str,
+    def __init__(self,init_para, a_arm: str,
                  sz_view_render: ViewRender, sc_view_render: ViewRender,
                  camera_thread: UdpReceiverThread,
                  dire_cam_pos_label: QLabel, pin_cam_pos_label: QLabel,
@@ -47,7 +47,9 @@ class ControlEvent:
                  control_to_aim: QPushButton,
                  fix_error_btn: QPushButton,
                  cali_wait_timer: QTimer,
-                 result_visual_timer: QTimer):
+                 result_visual_timer: QTimer,
+                 result_judge_timer:QTimer):
+        self.voxel_load_clip_ui = init_para.voxel_load_clip_ui
         self.sz_view_render = sz_view_render
         self.sc_view_render = sc_view_render
         self.camera_thread = camera_thread
@@ -85,6 +87,12 @@ class ControlEvent:
         # 机械臂指向目标点
         self.control_to_aim.clicked.connect(self.control_to_aim_func)
         self.aim_in_cam = None
+        self.previous_distance = None
+
+        self.result_judge_timer = result_judge_timer
+        self.result_judge_timer.setSingleShot(True)
+        self.result_judge_timer.timeout.connect(self.result_judge)
+
         self.result_visual_timer = result_visual_timer
         self.result_visual_timer.setSingleShot(True)  # 设置为单次触发
         self.result_visual_timer.timeout.connect(self.result_visual)
@@ -97,19 +105,23 @@ class ControlEvent:
             print("rt_cam2ct is None, 无法投影真实针到体素坐标系中")
             return
         if self.camera_thread.pin_balls_in_cam is not None:
-            real_dire_in_cam = self.camera_thread.pin_balls_in_cam[0]
-            real_pin_in_cam = self.camera_thread.pin_balls_in_cam[1]
+            real_dire_in_cam = self.camera_thread.pin_balls_in_cam[1]
+            real_pin_in_cam = self.camera_thread.pin_balls_in_cam[0]
             real_dire_in_ct = transform_point(self.rt_cam2ct, real_dire_in_cam)
             real_pin_in_ct = transform_point(self.rt_cam2ct, real_pin_in_cam)
+
+            self.voxel_load_clip_ui.show_pin_in_ct(real_dire_in_ct, real_pin_in_ct)
             # 针尾在两个坐标系下的坐标
             real_dire_uv1, real_dire_uv2 = get_pixel_from_ct(real_dire_in_ct,
                                                              self.sz_view_render.rt_ct2o,
                                                              self.sc_view_render.rt_ct2o,
                                                              self.a_arm)
+            # 针尖在两个坐标系下的坐标
             real_pin_uv1, real_pin_uv2 = get_pixel_from_ct(real_pin_in_ct,
                                                            self.sz_view_render.rt_ct2o,
                                                            self.sc_view_render.rt_ct2o,
                                                            self.a_arm)
+
             self.sz_view_render.set_real_pin(real_pin_uv1, real_dire_uv1)
             self.sc_view_render.set_real_pin(real_pin_uv2, real_dire_uv2)
 
@@ -166,22 +178,48 @@ class ControlEvent:
         self.result_visual_timer.start(2000)
 
     def fix_error(self):
-        aim_in_cam = self.aim_in_cam[:3]
+        if self.previous_distance < 0.5:
+            print("距离小于0.5mm，无需修正")
+        else:
+            aim_in_cam = self.aim_in_cam[:3]
+            P0 = self.camera_thread.pin_balls_in_cam[0]
+            P1 = self.camera_thread.pin_balls_in_cam[1]
+            pj_pt = get_pj_pt(aim_in_cam, P0, P1)
+            aim_in_cam1 = 2*aim_in_cam - pj_pt
+            # aim_in_cam2 = aim_in_cam - pj_pt + aim_in_cam
+            plot_5_points(P0, P1, aim_in_cam, pj_pt, aim_in_cam1)
+            self.arm_control.control_to_aim(aim_in_cam1)
+
+            self.result_judge_timer.start(1000)
+
+
+    def result_judge(self):
         P0 = self.camera_thread.pin_balls_in_cam[0]
         P1 = self.camera_thread.pin_balls_in_cam[1]
-        pj_pt = get_pj_pt(aim_in_cam, P0, P1)
-        aim_in_cam1 = 2*aim_in_cam - pj_pt
-        # aim_in_cam2 = aim_in_cam - pj_pt + aim_in_cam
-        plot_5_points(P0, P1, aim_in_cam, pj_pt, aim_in_cam1)
-        self.arm_control.control_to_aim(aim_in_cam1)
+        current_distance = get_distance_to_line(self.aim_in_cam[:3], P0, P1)
+        if self.previous_distance is not None:
+            difference = current_distance - self.previous_distance
+            print('距离差：', difference)
 
-        self.result_visual_timer.start(1000)
+            if difference < 0:
+                self.result_visual_timer.start(1000)
+            else:
+                self.arm_control.move(self.arm_control.true_previous_a,self.arm_control.true_previous_b)
+                self.arm_control.previous_optimal_a = self.arm_control.true_previous_a
+                self.arm_control.previous_optimal_b = self.arm_control.true_previous_b
+                self.result_visual_timer.start(1000)
+
+
+
 
     def result_visual(self):
         P0 = self.camera_thread.pin_balls_in_cam[0]
         P1 = self.camera_thread.pin_balls_in_cam[1]
         plot_line_and_point(P0, P1, self.aim_in_cam[:3])
-        print("目标点到投影点的距离：", get_distance_to_line(self.aim_in_cam[:3], P0, P1))
+        current_distance = get_distance_to_line(self.aim_in_cam[:3], P0, P1)
+        print("目标点到投影点的距离：", current_distance)
+
+        self.previous_distance = current_distance
         # print("定位球坐标:", P0, P1)
         # print("目标点坐标:", self.aim_in_cam[:3])
 
