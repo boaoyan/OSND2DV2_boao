@@ -1,17 +1,18 @@
-import sys
-from PyQt5.QtWidgets import QApplication, QMainWindow, QVBoxLayout, QWidget
-from pyvistaqt import QtInteractor
+import pyvista
+from view3D.dicom_load_funcs import volume_to_point_cloud, load_ct_voxel_file
+voxel_path = "data/spine107_img_cropped"
+ct_vox, vox_space, position, orientation = load_ct_voxel_file(voxel_path)
 
-app = QApplication(sys.argv)
-window = QMainWindow()
-central_widget = QWidget()
-layout = QVBoxLayout(central_widget)
-window.setCentralWidget(central_widget)
+grid = pyvista.ImageData(
+        dimensions=ct_vox.shape, spacing=vox_space, origin=(0, 0, 0)
+    )
 
-# 关键：测试 antialiasing=True
-plotter = QtInteractor(central_widget)
-plotter.ren_win.SetMultiSamples(4)
-layout.addWidget(plotter)
 
-window.show()
-sys.exit(app.exec_())
+grid.point_data["values"] = (
+    ct_vox.flatten(order="F") > 70
+)
+
+mesh = grid.contour_labels(smoothing=True, progress_bar=True)
+plotter = pyvista.Plotter()
+plotter.add_mesh(mesh, color='lightgray')
+plotter.show()

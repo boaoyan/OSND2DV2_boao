@@ -40,7 +40,7 @@ class ControlEvent:
                  camera_thread: UdpReceiverThread,
                  dire_cam_pos_label: QLabel, pin_cam_pos_label: QLabel,
                  robot_arm_param: dict,
-                 connect_arm_btn: QPushButton,
+                 connect_device_btn: QPushButton,
                  reset_arm_btn: QPushButton,
                  toggle_pin_pos_order_btn: QPushButton,
                  cali_arm_btn: QPushButton,
@@ -68,12 +68,12 @@ class ControlEvent:
 
         # 机械臂控制相关
         self.arm_control = RobotArmControl(robot_arm_param)
-        self.connect_arm_btn = connect_arm_btn
+        self.connect_device_btn = connect_device_btn
         self.reset_arm_btn = reset_arm_btn
         self.cali_arm_btn = cali_arm_btn
         self.control_to_aim = control_to_aim
 
-        self.connect_arm_btn.clicked.connect(self.arm_control.connect_serial)
+        self.connect_device_btn.clicked.connect(self.connect_serial)
         self.reset_arm_btn.clicked.connect(self.arm_control.reset_arm)
 
         # 机械臂标定
@@ -99,6 +99,11 @@ class ControlEvent:
         # 修正误差
         self.fix_error_btn = fix_error_btn
         self.fix_error_btn.clicked.connect(self.fix_error)
+
+
+    def connect_serial(self):
+        self.camera_thread.start_listening()
+        self.arm_control.connect_arm_serial()
 
     def update_real_pin(self):
         if self.rt_cam2ct is None:

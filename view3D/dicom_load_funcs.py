@@ -18,16 +18,11 @@ def _slices2voxels(slices):
     for i, s in enumerate(slices):
         img = s.pixel_array
         ct_vox[:, :, -i - 1] = img.T.astype(np.int16)
+        # ct_vox[:, :, -i - 1] = img.astype(np.int16)
     print("HU range:", ct_vox.min(), ct_vox.max())
     return ct_vox
 
-def _slices2voxels_updata(slices):
-    """
-    构建 3D 体数据，保持 slices 的原始顺序（应已按物理位置正确排序）
-    """
-    ct_vox = np.stack([s.pixel_array for s in slices], axis=-1)  # (H, W, D)
-    print("HU range:", ct_vox.min(), ct_vox.max())
-    return ct_vox.astype(np.int16)
+
 
 def load_ct_voxel_file(folder):
     """
@@ -52,21 +47,10 @@ def load_ct_voxel_file(folder):
     # ensure they are in the correct order
     slices = sorted(slices, key=lambda slice: slice.InstanceNumber)
     vox_space = np.array([slices[0].PixelSpacing[0], slices[0].PixelSpacing[1], slices[0].SliceThickness])
-    # slices.sort(key=lambda s: s.ImagePositionPatient[2], reverse=True)  # 头→足：Z 递减
-    #
-    # vox_space = np.array([
-    #     float(slices[0].PixelSpacing[0]),
-    #     float(slices[0].PixelSpacing[1]),
-    #     float(slices[0].SliceThickness)
-    # ])
-    ct_vox = _slices2voxels_updata(slices)
 
-    # 获取位置和方向（可选，用于严格空间对齐）
-    position = list(slices[0].ImagePositionPatient) if hasattr(slices[0], 'ImagePositionPatient') else [0, 0, 0]
-    orientation = list(slices[0].ImageOrientationPatient) if hasattr(slices[0], 'ImageOrientationPatient') else [1, 0,
-                                                                                                                 0, 0,
-                                                                                                   1, 0]
-    return ct_vox, vox_space, position, orientation
+    ct_vox = _slices2voxels(slices)
+
+    return ct_vox, vox_space
 
 
 def resample_to_isotropic(ct_vox, vox_space):
@@ -152,7 +136,7 @@ def volume_to_point_cloud(volume, vox_space, threshold=70, max_points=1_000_000)
     :param vox_space: [dx, dy, dz] in mm, e.g., [0.35, 0.35, 1.0]
     :return: points (N,3) in mm, intensities (N,)
     """
-    H, W, D = volume.shape
+
     dx, dy, dz = vox_space  # 0.35, 0.35, 1.0
 
     # 获取非零（或高于阈值）的体素位置（返回索引）
@@ -161,7 +145,8 @@ def volume_to_point_cloud(volume, vox_space, threshold=70, max_points=1_000_000)
     # 转为物理坐标（毫米）
     x_mm = x_idx * dx   # X 方向
     y_mm = y_idx * dy   # Y 方向
-    z_mm = (D - 1 - z_idx) * dz   # Z 方向
+    z_mm = z_idx * dz  # Z 方向
+    # z_mm = (D - 1 - z_idx) * dz   # Z 方向
 
     points = np.stack([x_mm, y_mm, z_mm], axis=1)  # shape (N, 3)
     intensities = volume[y_idx, x_idx, z_idx].astype(np.float32)

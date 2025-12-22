@@ -14,6 +14,7 @@ class UdpReceiverThread(QThread):
         self.ip = ip
         self.port = port
         self.running = True
+        self.should_listen = False
         self.n_average = max(1, n_average)
 
         # 当前平均后的结果
@@ -36,12 +37,17 @@ class UdpReceiverThread(QThread):
         return self._pin_balls_in_cam if not self.pin_order_flipped else self._pin_balls_in_cam[::-1]
 
     def run(self):
-        print("UDP receiver thread started")
+        print("UDP receiver thread started, waiting for listen trigger...")
         udp_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         udp_socket.bind((self.ip, self.port))
         udp_socket.settimeout(1)
 
         while self.running:
+            if not self.should_listen:
+                # 尚未触发监听，短暂休眠后继续检查
+                self.msleep(50)  # QThread 的 sleep，非 time.sleep
+                continue
+
             try:
                 data, addr = udp_socket.recvfrom(1024)
                 message = data.decode("utf-8")
@@ -53,6 +59,11 @@ class UdpReceiverThread(QThread):
                 break
 
         udp_socket.close()
+
+    def start_listening(self):
+        """外部调用此函数，开始接收 UDP 数据"""
+        self.should_listen = True
+
 
     def stop(self):
         self.running = False

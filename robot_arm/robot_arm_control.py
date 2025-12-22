@@ -59,7 +59,7 @@ class RobotArmControl(QThread):
     def reset_arm(self):
         self.move(self.reset_a, self.reset_b)
 
-    def connect_serial(self):
+    def connect_arm_serial(self):
         """
         打开并连接串口
         :return: bool, 是否成功

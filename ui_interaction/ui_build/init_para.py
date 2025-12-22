@@ -68,7 +68,7 @@ class InitPara(InitUILayout):
             "dire_cam_pos_label": self.dire_cam_pos_label,
             "pin_cam_pos_label": self.pin_cam_pos_label,
             "robot_arm_param": self.data_config["robot_arm_param"],
-            "connect_arm_btn": self.connect_arm_btn,
+            "connect_device_btn": self.connect_device_btn,
             "reset_arm_btn": self.reset_arm_btn,
             "toggle_pin_pos_order_btn": self.toggle_pin_pos_order_btn,
             "cali_arm_btn": self.cali_arm_btn,

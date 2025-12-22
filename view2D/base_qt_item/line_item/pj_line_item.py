@@ -12,7 +12,7 @@ class PJLineItem(BaseLineItem):
         self.item_list: list = self.init_item()
 
     def init_item(self):
-        thickness = 1.5
+        thickness = 1
         style = Qt.PenStyle.DashLine
         color = QColor(255, 240, 200)
         line = draw_line(color, thickness, style)
@@ -21,9 +21,11 @@ class PJLineItem(BaseLineItem):
                            "thickness": thickness, "style": style}
         return [line]
 
-    def set_item_pos(self, item_pos: list):
+    def set_item_pos(self, item_pos: list, line_color):
         start_pt, end_pt = item_pos
+        color = QColor(line_color)
         line = self.item_list[0]
         assert isinstance(line, QGraphicsLineItem)
-        line.setPen(QPen(self.properties["color"], self.properties["thickness"], self.properties["style"]))
+        # line.setPen(QPen(self.properties["color"], self.properties["thickness"], self.properties["style"]))
+        line.setPen(QPen(color, self.properties["thickness"], self.properties["style"]))
         line.setLine(start_pt[0], start_pt[1], end_pt[0], end_pt[1])

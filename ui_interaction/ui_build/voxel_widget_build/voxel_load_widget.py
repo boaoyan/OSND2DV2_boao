@@ -2,6 +2,7 @@
 import time
 
 import numpy as np
+import pyvista
 import pyvista as pv
 import vtk
 from pyvistaqt import QtInteractor
@@ -49,113 +50,110 @@ class VoxelLoadClipWidget(QWidget):
         layout.addWidget(self.plotter)
         parent_widget.setLayout(layout)
 
-        # 加载CT
-        ct_vox, vox_space, position, orientation = load_ct_voxel_file(voxel_path)
-
-        # 2. 各向同性重采样
-        ct_iso, vox_iso = resample_to_isotropic(ct_vox, vox_space)
-
-        # 3. 转点云
-        points, intensities = volume_to_point_cloud(ct_iso, vox_iso)
-
-        # 4. 显示（传入 vox_iso 用于动态点大小）
-        self.enhanced_show_spine(points, intensities, vox_space=vox_iso)
-        # # 1. 加载 DICOM
-        # volume, vox_space = load_dicom_volume(voxel_path)
-        #
-        # # 2. 转点云（可调 threshold）
-        # points, intensities = volume_to_point_cloud(volume, vox_space)
-        # # 3. 显示点云
-        # self.show_spine(points, intensities)
+        self.show_spine(voxel_path)
 
 
+    def show_spine(self, voxel_path):
+        ct_vox, vox_space = load_ct_voxel_file(voxel_path)
 
-
-    def enhanced_show_spine(self, points, intensities, vox_space=None):
-        """
-        增强版脊椎点云渲染函数
-        :param points: (N, 3) 物理坐标（mm）
-        :param intensities: (N,) 归一化强度 [0, 1]
-        :param vox_space: [dx, dy, dz]，用于动态设置 point_size（可选）
-        """
-        self.plotter.clear()
-        self.plotter.set_background("black")
-
-        if len(points) == 0:
-            print("No points to display.")
-            return
-        print("len(points):", len(points))
-        # —————— 1. 离群点剔除 ——————
-        if len(points) > 600_000:
-
-            # 随机下采样
-            idx = np.random.choice(len(points), 600_000, replace=False)
-            points_sub = points[idx]
-            intensities_sub = intensities[idx]
-            # 对子集做离群剔除
-            valid_mask_sub = remove_outliers_by_knn(points_sub)
-            # 得到最终 clean 点云（来自子集）
-            points_clean = points_sub[valid_mask_sub]
-            intensities_clean = intensities_sub[valid_mask_sub]
-        else:
-            valid_mask = remove_outliers_by_knn(points)
-            points_clean = points[valid_mask]
-            intensities_clean = intensities[valid_mask]
-
-        if len(points_clean) == 0:
-            print("All points filtered out.")
-            return
-
-        # —————— 2. 构建 PolyData 并估计法向 ——————
-        cloud = pv.PolyData(points_clean)
-        cloud["intensity"] = np.clip(intensities_clean, 0.2, 1.0)
-
-        # 法向估计（显著提升 lighting 效果）
-        try:
-            cloud.compute_normals(
-                point_normals=True,
-                cell_normals=False,
-                feature_angle=30.0,
-                inplace=True
-            )
-        except Exception as e:
-            print(f"Normal estimation failed (using default normals): {e}")
-
-        # —————— 3. 动态 point_size（基于体素间距） ——————
-        point_size = 8.0 # 默认
-        if vox_space is not None:
-            avg_spacing = float(np.mean(vox_space))
-            point_size = max(1.0, avg_spacing * 1.2)  # 确保点略大于体素
-
-        # —————— 4. 渲染 ——————
-        # 创建从浅米黄到深米黄的 colormap
-        BEIGE_COLORMAP = mcolors.LinearSegmentedColormap.from_list(
-            "beige_intensity",
-            [(0.48, 0.42, 0.34), (0.64, 0.58, 0.50), (0.80, 0.74, 0.66)]
-        )
-        # beige_color =  (163/255, 148/255, 128/255)
-        self.plotter.add_mesh(
-            cloud,
-            scalars="intensity",
-            cmap=BEIGE_COLORMAP,
-            # color=beige_color,
-            point_size=point_size,
-            render_points_as_spheres=True,
-            lighting=True,
-            ambient=0.3,
-            diffuse=0.7,
-            specular=0.4,
-            specular_power=25,
-            smooth_shading=True,
-            opacity=1.0,
-            show_scalar_bar=False  # 可选：隐藏色标以聚焦模型
+        grid = pyvista.ImageData(
+            dimensions=ct_vox.shape, spacing=vox_space, origin=(0, 0, 0)
         )
 
-        # —————— 5. 后处理渲染设置 ——————
-        self.plotter.enable_depth_peeling()  # 改善重叠透明
-        # self.plotter.enable_anti_aliasing()   # 若 PyVista 版本支持
+        grid.point_data["values"] = (
+                ct_vox.flatten(order="F") > 70
+        )
 
-        self.plotter.reset_camera()
+        mesh = grid.contour_labels(smoothing=True, progress_bar=True)
+
+        self.plotter.add_mesh(mesh, color='lightgray')
+        self.plotter.show()
+
+    # def enhanced_show_spine(self, points, intensities, vox_space=None):
+    #     """
+    #     增强版脊椎点云渲染函数
+    #     :param points: (N, 3) 物理坐标（mm）
+    #     :param intensities: (N,) 归一化强度 [0, 1]
+    #     :param vox_space: [dx, dy, dz]，用于动态设置 point_size（可选）
+    #     """
+    #     self.plotter.clear()
+    #     self.plotter.set_background("black")
+    #
+    #     if len(points) == 0:
+    #         print("No points to display.")
+    #         return
+    #     print("len(points):", len(points))
+    #     # —————— 1. 离群点剔除 ——————
+    #     if len(points) > 600_000:
+    #
+    #         # 随机下采样
+    #         idx = np.random.choice(len(points), 600_000, replace=False)
+    #         points_sub = points[idx]
+    #         intensities_sub = intensities[idx]
+    #         # 对子集做离群剔除
+    #         valid_mask_sub = remove_outliers_by_knn(points_sub)
+    #         # 得到最终 clean 点云（来自子集）
+    #         points_clean = points_sub[valid_mask_sub]
+    #         intensities_clean = intensities_sub[valid_mask_sub]
+    #     else:
+    #         valid_mask = remove_outliers_by_knn(points)
+    #         points_clean = points[valid_mask]
+    #         intensities_clean = intensities[valid_mask]
+    #
+    #     if len(points_clean) == 0:
+    #         print("All points filtered out.")
+    #         return
+    #
+    #     # —————— 2. 构建 PolyData 并估计法向 ——————
+    #     cloud = pv.PolyData(points_clean)
+    #     cloud["intensity"] = np.clip(intensities_clean, 0.2, 1.0)
+    #
+    #     # 法向估计（显著提升 lighting 效果）
+    #     try:
+    #         cloud.compute_normals(
+    #             point_normals=True,
+    #             cell_normals=False,
+    #             feature_angle=30.0,
+    #             inplace=True
+    #         )
+    #     except Exception as e:
+    #         print(f"Normal estimation failed (using default normals): {e}")
+    #
+    #     # —————— 3. 动态 point_size（基于体素间距） ——————
+    #     point_size = 8.0 # 默认
+    #     if vox_space is not None:
+    #         avg_spacing = float(np.mean(vox_space))
+    #         point_size = max(1.0, avg_spacing * 1.2)  # 确保点略大于体素
+    #
+    #     # —————— 4. 渲染 ——————
+    #     # 创建从浅米黄到深米黄的 colormap
+    #     BEIGE_COLORMAP = mcolors.LinearSegmentedColormap.from_list(
+    #         "beige_intensity",
+    #         [(0.48, 0.42, 0.34), (0.64, 0.58, 0.50), (0.80, 0.74, 0.66)]
+    #     )
+    #     # beige_color =  (163/255, 148/255, 128/255)
+    #     self.plotter.add_mesh(
+    #         cloud,
+    #         scalars="intensity",
+    #         cmap=BEIGE_COLORMAP,
+    #         # color=beige_color,
+    #         point_size=point_size,
+    #         render_points_as_spheres=True,
+    #         lighting=True,
+    #         ambient=0.3,
+    #         diffuse=0.7,
+    #         specular=0.4,
+    #         specular_power=25,
+    #         smooth_shading=True,
+    #         opacity=1.0,
+    #         show_scalar_bar=False  # 可选：隐藏色标以聚焦模型
+    #     )
+    #
+    #     # —————— 5. 后处理渲染设置 ——————
+    #     self.plotter.enable_depth_peeling()  # 改善重叠透明
+    #     # self.plotter.enable_anti_aliasing()   # 若 PyVista 版本支持
+    #
+    #     self.plotter.reset_camera()
 
 
     def show_selected_point(self, point):

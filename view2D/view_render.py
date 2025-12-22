@@ -35,7 +35,7 @@ class ViewRender:
         self.qt_view.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.qt_view.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.qt_view.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
-        self.qt_view.setFixedSize(400, 400)  # 强烈建议同时设置固定大小
+        self.qt_view.setFixedSize(600, 600)  # 强烈建议同时设置固定大小
         # section 1 在控件中添加场景
         self.qt_scene = QGraphicsScene()
         self.qt_view.setScene(self.qt_scene)
@@ -169,10 +169,10 @@ class ViewRender:
     def deactivate_self(self):
         self.qt_view.setStyleSheet("")
 
-    def draw_pj_line(self, slope, intercept):
+    def draw_pj_line(self, slope, intercept, line_color):
         self.slope, self.intercept = slope, intercept
         pts = get_line_in_img(slope, intercept)
-        self.pj_line_item.set_item_pos(pts)
+        self.pj_line_item.set_item_pos(pts, line_color)
         self.pj_line_item.set_item_visibility(True)
         if self.current_status == "none":
             self.current_status = "line"

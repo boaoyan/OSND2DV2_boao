@@ -7,7 +7,7 @@
     <x>0</x>
     <y>0</y>
     <width>981</width>
-    <height>543</height>
+    <height>554</height>
    </rect>
   </property>
   <property name="windowTitle">
@@ -45,7 +45,7 @@
           </size>
          </property>
          <property name="currentIndex">
-          <number>1</number>
+          <number>2</number>
          </property>
          <widget class="QWidget" name="tab_3">
           <attribute name="title">
@@ -210,9 +210,9 @@
             </spacer>
            </item>
            <item>
-            <widget class="QPushButton" name="connect_arm_btn">
+            <widget class="QPushButton" name="connect_device_btn">
              <property name="text">
-              <string>连接机械臂</string>
+              <string>连接设备</string>
              </property>
             </widget>
            </item>

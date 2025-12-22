@@ -72,7 +72,9 @@ class GuideEvent:
     @saved_ct_coords.setter
     def saved_ct_coords(self, value):
         self._saved_ct_coords = value
-        self.update_guide_pos_in_cam()
+        if self.rt_ct2cam is not None:
+            self.update_guide_pos_in_cam()
+
 
     def update_guide_pos_in_cam(self):
         if self._saved_ct_coords is not None:
@@ -170,7 +172,7 @@ class GuideEvent:
         slope, intercept = get_line(u, v,
                                     src_view.rt_ct2o, dst_view.rt_ct2o,
                                     self.a_arm, self.a_inv, self.L)
-        dst_view.draw_pj_line(slope, intercept)
+        dst_view.draw_pj_line(slope, intercept, line_color)
         # 如果两个点都确定了，则可以返回实际CT体素坐标
         if src_view.real_uv is not None and dst_view.real_uv is not None:
             self.current_ct_coords = get_coord_in_ct(self.sz_view_render.real_uv,
