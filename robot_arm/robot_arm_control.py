@@ -39,11 +39,15 @@ class RobotArmControl(QThread):
         self.param_toolP = np.array(config['param_toolP'])
         self.param_cz = np.array(config['param_cz'])
         # 机械臂标定
-        cali_a = config['cali_a']
-        cali_b = config['cali_b']
-        cali_num = config['cali_num']
-        self.cali_a_sequence = np.linspace(cali_a[0], cali_a[1], cali_num)
-        self.cali_b_sequence = np.linspace(cali_b[0], cali_b[1], cali_num)
+        # cali_a = config['cali_a']
+        # cali_b = config['cali_b']
+        # cali_num = config['cali_num']
+        # self.cali_a_sequence = np.linspace(cali_a[0], cali_a[1], cali_num)
+        # self.cali_b_sequence = np.linspace(cali_b[0], cali_b[1], cali_num)
+        cali_a_new = config['cali_a_new']
+        cali_b_new = config['cali_b_new']
+        self.cali_a_sequence = np.array(cali_a_new)
+        self.cali_b_sequence = np.array(cali_b_new)
         self.current_cali_pos_index = 0
         self.rt_arm2cam = None
         self.previous_optimal_a = None

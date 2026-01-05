@@ -38,7 +38,7 @@ def remove_outliers_by_knn(points, k=10, std_ratio=2.0):
 class VoxelLoadClipWidget(QWidget):
 
 
-    def __init__(self, parent_widget, voxel_path):
+    def __init__(self, parent_widget):
 
         self._guide_actor_names = []
         self._latest_sz_actor_names = []
@@ -50,25 +50,47 @@ class VoxelLoadClipWidget(QWidget):
         layout.addWidget(self.plotter)
         parent_widget.setLayout(layout)
 
-        self.show_spine(voxel_path)
+        # self.show_spine(voxel_path)
 
 
-    def show_spine(self, voxel_path):
+    def show_spine(self, voxel_path, threshold=70):
         ct_vox, vox_space = load_ct_voxel_file(voxel_path)
+        origin = ct_vox.shape * vox_space / 2 * (-1)
+        ct2ct_centre = np.array([[-1, 0.0000, 0.0000, 0],
+                                 [0.0000, -1, 0.0000, 0],
+                                 [0.0000, 0.0000, 1.0000, 0],
+                                 [0.0000, 0.0000, 0.0000, 1.0000]])
+
 
         grid = pyvista.ImageData(
-            dimensions=ct_vox.shape, spacing=vox_space, origin=(0, 0, 0)
+            dimensions=ct_vox.shape, spacing=vox_space, origin=origin
         )
 
         grid.point_data["values"] = (
-                ct_vox.flatten(order="F") > 70
+                ct_vox.flatten(order="F") > threshold
         )
 
         mesh = grid.contour_labels(smoothing=True, progress_bar=True)
+        mesh = mesh.transform(ct2ct_centre, inplace=True)
 
         self.plotter.add_mesh(mesh, color='lightgray')
         self.plotter.show()
 
+    # def update_show_spine(self, voxel_path, threshold):
+    #     ct_vox, vox_space = load_ct_voxel_file(voxel_path)
+    #
+    #     grid = pyvista.ImageData(
+    #         dimensions=ct_vox.shape, spacing=vox_space, origin=(0, 0, 0)
+    #     )
+    #
+    #     grid.point_data["values"] = (
+    #             ct_vox.flatten(order="F") > threshold
+    #     )
+    #
+    #     mesh = grid.contour_labels(smoothing=True, progress_bar=True)
+    #
+    #     self.plotter.add_mesh(mesh, color='lightgray')
+    #     self.plotter.show()
     # def enhanced_show_spine(self, points, intensities, vox_space=None):
     #     """
     #     增强版脊椎点云渲染函数
@@ -168,12 +190,12 @@ class VoxelLoadClipWidget(QWidget):
             name='selected_point'  # 命名以便后续更新/删除
         )
 
-    def show_line_in_ct(self, oct_source, pot, view_type, color):
+    def show_line_in_ct(self, oct_source, pct, view_type, color):
         """
         view_type: 'sz' (正位) or 'sc' (侧位)
         """
         oct_source = np.asarray(oct_source)
-        pot = np.asarray(pot)
+        pct = np.asarray(pct)
 
         # 1. 清除同类型的旧射线
         if view_type == 'sz':
@@ -202,23 +224,28 @@ class VoxelLoadClipWidget(QWidget):
         # ✅ 保存当前相机状态（关键！）
         camera = self.plotter.camera.copy()
 
-        # 4. 绘制
-        line = pv.Line(oct_source, pot)
+        # # 4. 绘制
+        # pct = np.array([-pct[0], pct[1], -pct[2]])
+        # oct_source = np.array([pct[0], oct_source[1], pct[2]])
+        print('pct, oct_source',pct, oct_source)
+        line = pv.Line(oct_source, pct)
         self.plotter.add_mesh(line, color=color, line_width=1.5, name=line_name)
 
         # 光源点（绿色）
+
         self.plotter.add_points(
             oct_source, color='green', point_size=6,
             render_points_as_spheres=True, name=source_name
         )
         # 投影点
         self.plotter.add_points(
-            pot, color=color, point_size=6,
+            pct, color=color, point_size=6,
             render_points_as_spheres=True, name=proj_name
         )
 
         # ✅ 恢复相机状态（防止自动缩放）
         self.plotter.camera = camera
+        self.plotter.add_axes()
         self.plotter.render()
 
 

@@ -49,6 +49,8 @@ class GuideEvent:
         self.res_w = None
         self.world_aim_pos_label = world_aim_pos_label
 
+
+
     @property
     def is_planning(self):
         return self._is_planning
@@ -167,8 +169,10 @@ class GuideEvent:
             return  # 没有有效坐标，不处理
 
         u, v = uv
-        oct_source, pot = get_point_in_ct(u, v, src_view.rt_ct2o, self.a_inv, self.L)
-        self.voxel_load_clip_ui.show_line_in_ct(oct_source, pot, view_type, line_color)
+
+        # print("u, v: ", u, v)
+        oct_source, pct = get_point_in_ct(u, v, src_view.rt_ct2o, self.a_inv, self.L)
+        self.voxel_load_clip_ui.show_line_in_ct(oct_source, pct, view_type, line_color)
         slope, intercept = get_line(u, v,
                                     src_view.rt_ct2o, dst_view.rt_ct2o,
                                     self.a_arm, self.a_inv, self.L)

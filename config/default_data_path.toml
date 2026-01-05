@@ -1,5 +1,5 @@
 # ct_x,ct_y,ct_z此时仍然在物理坐标系下
-balls_pts = "data/balls_pts.csv"
+balls_pts = "data/balls_pts_new.csv"
 vox_space = [0.3515625, 0.3515625, 1.0       ]
 
 [robot_arm_param]
@@ -14,6 +14,8 @@ vox_space = [0.3515625, 0.3515625, 1.0       ]
     a_threshold = [2000, 4000]
     b_threshold = [2100, 3000]
     # 机械臂标定相关
+    cali_a_new = [2800, 2900, 3000, 3100, 3200, 3100, 3000, 2900]
+    cali_b_new = [2500, 2400, 2300, 2400, 2500, 2600, 2700, 2600]
     cali_a = [2400, 3600]
     cali_b = [2200, 2800]
     cali_num = 7
@@ -35,11 +37,16 @@ vox_space = [0.3515625, 0.3515625, 1.0       ]
 #    # sleeve 坐标系到 arm 坐标系的变换
 #    param_cz = [0.01432229, 1.23184338]
 
-    param_toolP = [[1.45526456, -1.1987327, 58.26851035],
-                   [-1.84702146, -0.09225894, -56.2127245]]
+#    param_toolP = [[1.45526456, -1.1987327, 58.26851035],
+#                   [-1.84702146, -0.09225894, -56.2127245]]
+#    param_R2C = [27.9667127, 102.852567, -720.579140, -1.33338730, -0.121890080, 1.23586902]
+#    # tool 坐标系到 base 坐标系的变换
+#    param_cz = [-0.000887485743, -1.00591364]
+    param_toolP = [[2.09657012, -1.77113901, 56.68020536],
+                   [-2.60155985, 0.93680154, -57.77783223]]
     param_R2C = [27.9667127, 102.852567, -720.579140, -1.33338730, -0.121890080, 1.23586902]
     # tool 坐标系到 base 坐标系的变换
-    param_cz = [-0.000887485743, -1.00591364]
+    param_cz = [0.01164377, 1.629633687]
 
 [vox_image]
     vox_img_path = "data/spine107_img_cropped"
@@ -48,14 +55,14 @@ vox_space = [0.3515625, 0.3515625, 1.0       ]
 # 标准正位（270,90,-90）
 # 标准侧位（270,90, 180）
 # 投影矩阵的alpha与beta为正
-    front_img_path = "data/ct_img/x270_y90_z-90.png"
-    side_img_path = "data/ct_img/x270_y90_z180.png"
+    front_img_path = "data/ct_img/front_img.png"
+    side_img_path = "data/ct_img/side_img.png"
 
 [camera_param]
     ip = "127.0.0.1"
     port = 8080
 
 [trans_matrix]
-    a_arm = "data/trans_matrix/spine107/a_arm.npy"
-    rt_ct2o_sz = "data/trans_matrix/spine107/rt_ct2o_sz.npy"
-    rt_ct2o_sc = "data/trans_matrix/spine107/rt_ct2o_sc.npy"
+    a_arm = "data/trans_matrix/spine107/a_arm_new.npy"
+    rt_ct2o_sz = "data/trans_matrix/rt_centre_ct2o_sz.npy"
+    rt_ct2o_sc = "data/trans_matrix/rt_centre_ct2o_sc.npy"

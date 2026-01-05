@@ -1,6 +1,7 @@
 import numpy as np
 import pandas as pd
 from PyQt5.QtCore import QTimer
+from PyQt5.QtWidgets import QMessageBox
 
 from camera_communication.get_cam_data import UdpReceiverThread
 from ui_interaction.ui_build.init_layout import InitUILayout
@@ -25,23 +26,32 @@ class InitPara(InitUILayout):
                                                self.data_config["camera_param"]["port"])
         self.camera_thread.start()
         # 初始化脊柱3D图像
-        voxel_path = self.data_config["vox_image"]["vox_img_path"]
-        self.voxel_load_clip_ui = VoxelLoadClipWidget(self.voxel_view, voxel_path)
+        self.voxel_path = self.data_config["vox_image"]["vox_img_path"]
+        # self.voxel_load_clip_ui = None
+
+        self.voxel_load_clip_ui = VoxelLoadClipWidget(self.voxel_view)
 
         # 初始化视图显示窗口
         front_img = cv.imread(self.data_config["ct_image"]["front_img_path"], 0)
+        # front_img = np.flip(front_img, axis=0)
         self.front_view_render = ViewRender(self.front_view, front_img, self.front_uv_label,
                                             self.data_config["trans_matrix"]["rt_ct2o_sz"])
+
         side_img = cv.imread(self.data_config["ct_image"]["side_img_path"], 0)
+        # side_img = np.flip(side_img)
         self.side_view_render = ViewRender(self.side_view, side_img, self.side_uv_label,
                                            self.data_config["trans_matrix"]["rt_ct2o_sc"])
         self.view_manager = ViewerManager()
         self.view_manager.viewers.append(self.front_view_render)
         self.view_manager.viewers.append(self.side_view_render)
 
+        self.import_img_btn.clicked.connect(self.import_img)
+        self.update_voxel_model_btn.clicked.connect(self.update_voxel_model)
+
         # 添加事件处理
         balls_pts = pd.read_csv(self.data_config["balls_pts"])
         balls_in_ct = balls_pts[["ct_x", "ct_y", "ct_z"]].values
+        balls_in_ct = balls_in_ct + np.array([90, 90, -53])
         vox_space = self.data_config["vox_space"]
         guide_event_params = {
             "init_para": self,
@@ -79,3 +89,17 @@ class InitPara(InitUILayout):
             "result_judge_timer": QTimer(self),
         }
         self.control_event = ControlEvent(**control_event_params)
+
+    def import_img(self):
+        self.front_view_render.show_img()
+        self.side_view_render.show_img()
+        self.voxel_load_clip_ui.show_spine(self.voxel_path)
+
+
+    def update_voxel_model(self):
+        try:
+            threshold = float(self.spine_threshold.text())  # ← 转为 float
+        except ValueError:
+            QMessageBox.warning(self, "输入错误", "阈值必须是有效数字！")
+            return
+        self.voxel_load_clip_ui.show_spine(self.voxel_path, threshold=threshold)

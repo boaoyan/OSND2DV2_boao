@@ -39,12 +39,12 @@ class ViewRender:
         # section 1 在控件中添加场景
         self.qt_scene = QGraphicsScene()
         self.qt_view.setScene(self.qt_scene)
-        self.qt_scene.setBackgroundBrush(QBrush(QColor(0, 0, 0)))
+        self.qt_scene.setBackgroundBrush(QBrush(QColor(255,255,255)))
         # section 2 添加背景投影图
         origin_img = apply_circular_mask(darken_image(255 - origin_img))
         self.origin_img = origin_img
         self.bg_im = None
-        self.update_im(self.origin_img)
+        # self.update_im(self.origin_img)
         # section 3 规划功能
         self.signal = Communicate()
         self.qt_view.mousePressEvent = self.mouse_press_event
@@ -87,6 +87,20 @@ class ViewRender:
     @real_uv.setter
     def real_uv(self, value):
         self._real_uv = value
+
+    def show_img(self, is_set_scene_size=True):
+        """
+        显示背景图像（通常由按钮触发）
+        """
+        if self.origin_img is not None:
+            # ✅ 切换背景为黑色（医学图像常用）
+            self.qt_scene.setBackgroundBrush(QBrush(QColor(0, 0, 0)))
+            # 显示图像
+            self.update_im(self.origin_img, uv=np.array([0, 0]), is_set_scene_size=is_set_scene_size)
+            self.resize_event()
+        else:
+            print("Warning: origin_img is None, cannot show image.")
+
 
     def update_im(self, im, uv=np.array([0, 0]), is_set_scene_size=False):
         """

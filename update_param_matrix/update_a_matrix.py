@@ -1,6 +1,8 @@
 import numpy as np
 
-d_s2p = 800
+sid = 500 #光源到投影中心的距离
+
+d_s2p = 800 #光源到投影面的距离
 im_sz = [512, 512]
 pan_sz = [210, 210]
 a = np.array([[-d_s2p * im_sz[0] / pan_sz[0], 0, (im_sz[0]) / 2],
