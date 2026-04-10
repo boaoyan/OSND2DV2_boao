@@ -1,8 +1,12 @@
+import copy
+
 import numpy as np
 from PyQt5.QtCore import Qt, QRectF
 from PyQt5.QtGui import QBrush, QColor, QPixmap
 from PyQt5.QtWidgets import QGraphicsView, QGraphicsScene, QGraphicsPixmapItem, QLabel, QSizePolicy
 
+from registration.reg_rt_ct2o import reg_ct2o
+from registration.reg_rt_ct2o_mix import reg_ct2o_mix
 from view2D.base_qt_item import BasePointItem, PJLineItem, SingleLineItem
 from view2D.utils import convert_gray_to_qimage
 from view2D.utils.CommunicatedSignal import Communicate
@@ -30,7 +34,9 @@ def get_line_in_img(m, c, img_size=512):
 
 
 class ViewRender:
-    def __init__(self, qt_view: QGraphicsView, origin_img, uv_label: QLabel, rt_ct2o: str):
+    def __init__(self, qt_view: QGraphicsView, origin_img, uv_label: QLabel,
+                 standard_pose, voxel_nii_path, model_path):
+    # def __init__(self, qt_view: QGraphicsView, origin_img, uv_label: QLabel, rt_ct2o:str):
         self.qt_view = qt_view
         self.qt_view.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.qt_view.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
@@ -41,6 +47,7 @@ class ViewRender:
         self.qt_view.setScene(self.qt_scene)
         self.qt_scene.setBackgroundBrush(QBrush(QColor(255,255,255)))
         # section 2 添加背景投影图
+        reg_img = copy.deepcopy(origin_img)
         origin_img = apply_circular_mask(darken_image(255 - origin_img))
         self.origin_img = origin_img
         self.bg_im = None
@@ -57,8 +64,17 @@ class ViewRender:
         # 键盘移动点位置
         self.qt_view.keyPressEvent = self.key_press_event
         # CT坐标系到光源坐标系的转换关系
-        self.rt_ct2o = np.load(rt_ct2o)
-        print("加载的转换矩阵为：", self.rt_ct2o)
+        # self.rt_ct2o = np.load(rt_ct2o)
+        self.rt_ct2o = reg_ct2o(reg_img,
+                                standard_pose,
+                                voxel_nii_path,
+                                model_path)
+
+        # self.rt_ct2o = reg_ct2o_mix(reg_img,
+        #                         standard_pose,
+        #                         voxel_nii_path,
+        #                         model_path)
+        # print("加载的转换矩阵为：", self.rt_ct2o)
         # 绘制投影线
         self.pj_line_item = PJLineItem(self.qt_scene)
         self.slope, self.intercept = None, None

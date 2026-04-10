@@ -8,6 +8,7 @@ from torch.optim.lr_scheduler import ReduceLROnPlateau
 
 from registration.grid_efficientnet.grid_efficientb0_model import GridModel
 from registration.label_transform import LabelTransform
+from registration.label_transform_mix import LabelTransformMix
 from registration.projector.drr import DRR
 from registration.projector.read_data import read
 from registration.projector.pose import convert
@@ -49,21 +50,14 @@ def init_config():
             'conv_mlp': 0
         },
         "noise_params":{
-            'standard_pose': 'PA',
-            'PA':{
-                'trans_noise_range': [25, 25, 25],
-                'rota_noise_range': [5, 5, 10],
-            },
-            'RLAT':{
-                'trans_noise_range': [25, 25, 25],
-                'rota_noise_range': [10, 5, 5],
-            }
+            'trans_noise_range': [25, 25, 25],
+            'rota_noise_range': [5, 5, 5]
         }
     }
 
-def get_mse_loss(config, label_transformer, labels, outputs, pts):
-    pre_rota, pre_trans = label_transformer.label2real(outputs)
-    tru_rota, tru_trans = label_transformer.label2real(labels)
+def get_mse_loss(config, label_transformer_mix, labels, outputs, pts):
+    pre_rota, pre_trans = label_transformer_mix.label2real(outputs)
+    tru_rota, tru_trans = label_transformer_mix.label2real(labels)
     tru_pose = convert(tru_rota, tru_trans, parameterization="euler_angles", convention="ZXY", degrees=True)
     pre_pose = convert(pre_rota, pre_trans, parameterization="euler_angles", convention="ZXY", degrees=True)
     tru_pts = torch.matmul(tru_pose.rotation.mT, pts.T)
@@ -82,42 +76,56 @@ def sample_cube_points(n, size=100):
 
 
 global_config = init_config()
-standard_pose = global_config['noise_params']['standard_pose']
 batch_size = global_config['batch_size']
-rota_noise_range = torch.tensor(global_config['noise_params'][standard_pose]['rota_noise_range'])
-trans_noise_range = torch.tensor(global_config['noise_params'][standard_pose]['trans_noise_range'])
-label_transformer = LabelTransform(global_config['noise_params'])
+rota_noise_range = torch.tensor(global_config['noise_params']['rota_noise_range'])
+trans_noise_range = torch.tensor(global_config['noise_params']['trans_noise_range'])
+label_transformer_mix = LabelTransformMix(global_config['noise_params'])
 volume_dir_2 = r"../data/spine107_img.nii.gz"
-subject = read(volume_dir_2, bone_attenuation_multiplier=1.0, orientation=standard_pose, sid=500)
+
+subject_pa = read(volume_dir_2, bone_attenuation_multiplier=1.0, orientation='PA', sid=500)
+subject_rlat = read(volume_dir_2, bone_attenuation_multiplier=1.0, orientation='RLAT', sid=500)
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 delx = 0.469
-height = 128
-drr = DRR(
-    subject,  # An object storing the CT volume, origin, and voxel spacing
+height = 512
+drr_pa = DRR(
+    subject_pa,  # An object storing the CT volume, origin, and voxel spacing
+    sdd=800,  # Source-to-detector distance (i.e., focal length)
+    height=height,  # Image height (if width is not provided, the generated DRR is square)
+    delx=delx,  # Pixel spacing (in mm)
+    renderer="trilinear"
+).to(device)
+drr_rlat = DRR(
+    subject_rlat,  # An object storing the CT volume, origin, and voxel spacing
     sdd=800,  # Source-to-detector distance (i.e., focal length)
     height=height,  # Image height (if width is not provided, the generated DRR is square)
     delx=delx,  # Pixel spacing (in mm)
     renderer="trilinear"
 ).to(device)
 
-
 pts = sample_cube_points(3)
 
 model = GridModel(model_config=global_config['model_config'], num_classes=6).to(device)
 optimizer = optim.Adam(model.parameters(), lr=global_config["lr"])
-scheduler = ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=1)
+scheduler = ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=200)
 max_steps = global_config['max_steps']
 
 # === 配置保存路径 ===
-checkpoint_dir = f"./checkpoints_{standard_pose}"
+checkpoint_dir = f"./checkpoints_mix_view"
 os.makedirs(checkpoint_dir, exist_ok=True)
 losses = []  # 用于记录每一步的 loss（也可改为每个 epoch 的平均 loss）
 
 best_loss = float('inf')
 
+
 for i in range(max_steps):
-    # --- 生成噪声 ---
+    # 1. 随机选择视角
+    current_orientation = np.random.choice(['PA', 'RLAT'])
+
+    # 2. 选择对应的 DRR 生成器
+    current_drr = drr_pa if current_orientation == 'PA' else drr_rlat
+
+    # 3. 生成噪声 (PA 和 RLAT 可以使用相同的噪声范围，简化任务)
     translation_noise = np.random.uniform(
         low=-np.array(trans_noise_range),
         high=np.array(trans_noise_range),
@@ -129,11 +137,12 @@ for i in range(max_steps):
         high=np.array(rota_noise_range),
         size=(batch_size, 3)
     ).astype(np.float32)
-
-    # --- 转为张量并生成 DRR ---
+    # 4. 生成 DRR 图像
     rotations = torch.tensor(rotation_noise, dtype=torch.float32, device=device)
     translations = torch.tensor(translation_noise, dtype=torch.float32, device=device)
-    img = drr(rotations, translations, parameterization="euler_angles", convention="ZXY", degrees=True)
+
+    # 注意：这里 drr 调用不需要传 orientation，因为生成器已经绑定了基座视角
+    img = current_drr(rotations, translations, parameterization="euler_angles", convention="ZXY", degrees=True)
     img = norm_img(img)
 
     # --- 前向传播 ---
@@ -149,7 +158,7 @@ for i in range(max_steps):
     ), dim=1)
 
     # --- 计算损失 ---
-    loss = get_mse_loss(global_config, label_transformer, label, output, pts)
+    loss = get_mse_loss(global_config, label_transformer_mix, label, output, pts)
     loss_val = loss.item()
     losses.append(loss_val)
 

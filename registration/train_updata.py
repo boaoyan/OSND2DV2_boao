@@ -6,11 +6,11 @@ import torch.optim as optim
 import torch.nn.functional as F
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 
-from registration.grid_efficientnet.grid_efficientb0_model import GridModel
-from registration.label_transform import LabelTransform
-from registration.projector.drr import DRR
-from registration.projector.read_data import read
-from registration.projector.pose import convert
+from grid_efficientnet.grid_efficientb0_model import GridModel
+from label_transform import LabelTransform
+from projector.drr import DRR
+from projector.read_data import read
+from projector.pose import convert
 
 def norm_img(img):
     # img: [B, 1, H, W]
@@ -30,7 +30,7 @@ def norm_img(img):
 
 def init_config():
     return {
-        "batch_size": 1,
+        "batch_size": 16,
         "lr": 5e-4,
         "device": "cuda" if torch.cuda.is_available() else "cpu",
         "height": 224,
@@ -42,7 +42,7 @@ def init_config():
         "min_delta": 1e-6,
         "max_saved_model_num": 5,
         "val_steps": 25,
-        "max_steps": 50,
+        "max_steps": 10000,
         "model_config": {
             'edffn' : 1,
             'eca' : 0,
@@ -87,12 +87,12 @@ batch_size = global_config['batch_size']
 rota_noise_range = torch.tensor(global_config['noise_params'][standard_pose]['rota_noise_range'])
 trans_noise_range = torch.tensor(global_config['noise_params'][standard_pose]['trans_noise_range'])
 label_transformer = LabelTransform(global_config['noise_params'])
-volume_dir_2 = r"../data/spine107_img.nii.gz"
+volume_dir_2 = r"data/spine107_img.nii.gz"
 subject = read(volume_dir_2, bone_attenuation_multiplier=1.0, orientation=standard_pose, sid=500)
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 delx = 0.469
-height = 128
+height = 512
 drr = DRR(
     subject,  # An object storing the CT volume, origin, and voxel spacing
     sdd=800,  # Source-to-detector distance (i.e., focal length)
@@ -102,7 +102,7 @@ drr = DRR(
 ).to(device)
 
 
-pts = sample_cube_points(3)
+pts = sample_cube_points(3).to(device)
 
 model = GridModel(model_config=global_config['model_config'], num_classes=6).to(device)
 optimizer = optim.Adam(model.parameters(), lr=global_config["lr"])

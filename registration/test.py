@@ -1,52 +1,26 @@
 import numpy as np
-import torch
-from registration.projector.drr import DRR
-from registration.projector.read_data import read
-batch_size = 2
-rota_noise_range = [5, 5, 10]
-trans_noise_range = [25, 50, 25]
-volume_dir_2 = r"../data/spine107_img.nii.gz"
-subject = read(volume_dir_2, bone_attenuation_multiplier=1.0, orientation="PA", sid=500)
 
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-delx = 0.469
-height = 512
-drr = DRR(
-    subject,  # An object storing the CT volume, origin, and voxel spacing
-    sdd=800,  # Source-to-detector distance (i.e., focal length)
-    height=height,  # Image height (if width is not provided, the generated DRR is square)
-    delx=delx,  # Pixel spacing (in mm)
-    renderer="trilinear"
-).to(device)
+from registration.math_process.data_fusion import euler_angles_to_rotation_matrix_zxy, \
+    rotation_matrix_to_euler_angles_zxy_numpy
 
-# rotations = torch.tensor([[0, 0, 0]], dtype=torch.float32, device=device)
-# translations = torch.tensor([[0, 0, 0]], dtype=torch.float32, device=device)
-translation_noise = np.array([0, 0, 0], dtype=np.float32)
-rotation_noise = np.array([0, 0, 0], dtype=np.float32)
+# 你的数据
+pa_rota = np.array([[-0.615322, -3.018059, -2.578065],
+                    [ 0.418664, -4.187374,  2.614614],
+                    [-0.317884, -1.497839, -3.685053]])
 
-# 按维度均匀分布生成随机数
-# translation_noise = np.array(
-#     [np.random.uniform(-r, r) for r in trans_noise_range], dtype=np.float32
-# )
-translation_noise = np.random.uniform(
-    low=-np.array(trans_noise_range),
-    high=np.array(trans_noise_range),
-    size=(batch_size, 3)
-).astype(np.float32)
+sz_rota = np.array([[172.274656, -0.971212,  3.913945],
+                    [-179.801570, 6.469544,  9.548560],
+                    [177.032167, -2.852009,  7.141860]])
 
-# rotation_noise = np.array(
-#     [np.random.uniform(-r, r) for r in rota_noise_range], dtype=np.float32
-# )
-rotation_noise = np.random.uniform(
-    low=-np.array(rota_noise_range),
-    high=np.array(rota_noise_range),
-    size=(batch_size, 3)
-).astype(np.float32)
+# 重建旋转矩阵
+R_pa = euler_angles_to_rotation_matrix_zxy(pa_rota)
+R_sz = euler_angles_to_rotation_matrix_zxy(sz_rota)
 
-rotations = torch.tensor(rotation_noise, dtype=torch.float32, device=device)
-translations = torch.tensor(translation_noise, dtype=torch.float32, device=device)
-img = drr(rotations, translations, parameterization="euler_angles", convention="ZXY", degrees=True)
+# 计算矩阵差异
+matrix_error = np.max(np.abs(R_pa - R_sz))
+print(f"🔍 旋转矩阵最大元素误差: {matrix_error:.2e}")
 
-
-
-print(img.shape)
+# 计算残差旋转的欧拉角（标准误差指标）
+R_err = np.einsum('nij,njk->nik', R_pa.transpose(0,2,1), R_sz)
+err_euler = rotation_matrix_to_euler_angles_zxy_numpy(R_err)
+print(f"📐 残差欧拉角误差 (度):\n{err_euler}")

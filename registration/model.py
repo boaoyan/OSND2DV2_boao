@@ -1,13 +1,10 @@
 import numpy as np
-import os
-import json
 import torch
-import torch.optim as optim
 import torch.nn.functional as F
-from torch.optim.lr_scheduler import ReduceLROnPlateau
 
 from registration.grid_efficientnet.grid_efficientb0_model import GridModel
 from registration.label_transform import LabelTransform
+from registration.label_transform_mix import LabelTransformMix
 from registration.projector.drr import DRR
 from registration.projector.read_data import read
 from registration.projector.pose import convert
@@ -49,15 +46,8 @@ def init_config():
             'conv_mlp': 0
         },
         "noise_params":{
-            'standard_pose': 'RLAT',
-            'PA':{
-                'trans_noise_range': [25, 25, 25],
-                'rota_noise_range': [5, 5, 10],
-            },
-            'RLAT':{
-                'trans_noise_range': [25, 25, 25],
-                'rota_noise_range': [10, 5, 5],
-            }
+            'trans_noise_range': [25, 25, 25],
+            'rota_noise_range': [5, 5, 5]
         }
     }
 
@@ -82,15 +72,17 @@ def sample_cube_points(n, size=100):
 
 
 global_config = init_config()
-standard_pose = global_config['noise_params']['standard_pose']
 batch_size = global_config['batch_size']
-rota_noise_range = torch.tensor(global_config['noise_params'][standard_pose]['rota_noise_range'])
-trans_noise_range = torch.tensor(global_config['noise_params'][standard_pose]['trans_noise_range'])
-label_transformer = LabelTransform(global_config['noise_params'])
+rota_noise_range = torch.tensor(global_config['noise_params']['rota_noise_range'])
+trans_noise_range = torch.tensor(global_config['noise_params']['trans_noise_range'])
+label_transformer_mix = LabelTransformMix(global_config['noise_params'])
 volume_dir_2 = r"../data/spine107_img.nii.gz"
-subject = read(volume_dir_2, bone_attenuation_multiplier=1.0, orientation=standard_pose, sid=500)
+
+subject = read(volume_dir_2, bone_attenuation_multiplier=1.0, orientation='RLAT', sid=500)
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+
 delx = 0.469
 height = 512
 drr = DRR(
@@ -120,21 +112,36 @@ rotation_noise = np.random.uniform(
 # --- 转为张量并生成 DRR ---
 rotations = torch.tensor(rotation_noise, dtype=torch.float32, device=device)
 translations = torch.tensor(translation_noise, dtype=torch.float32, device=device)
+rotations = torch.tensor([[3, -3, 2]], dtype=torch.float32, device=device)
+translations = torch.tensor([[5, -10, 20]], dtype=torch.float32, device=device)
 img = drr(rotations, translations, parameterization="euler_angles", convention="ZXY", degrees=True)
+print(img.shape)
 img = norm_img(img)
 
-norm_rota_noise = rotation_noise / np.array(rota_noise_range)
-norm_tran_noise = translation_noise / np.array(trans_noise_range)
+# test_rot = torch.tensor([[3.0, 0.0, -2.0]], device=device)  # 在噪声范围内
+# test_trans = torch.tensor([[10.0, 0.0, -15.0]], device=device)
+#
+# img_test = drr(test_rot, test_trans, parameterization="euler_angles", convention="ZXY", degrees=True)
+# img_test = norm_img(img_test)
+# with torch.no_grad():
+#     pred = model(img_test)
+#     pred_rot, pred_trans = label_transformer_mix.label2real(pred)
+# print(f"输入: rot={test_rot[0].tolist()}, trans={test_trans[0].tolist()}")
+# print(f"预测: rot={pred_rot[0].tolist()}, trans={pred_trans[0].tolist()}")
+# print(f"误差: rot={(pred_rot-test_rot).abs()[0].tolist()}, trans={(pred_trans-test_trans).abs()[0].tolist()}")
+
+norm_rota_noise = rotations  / np.array(rota_noise_range)
+norm_tran_noise = translations / np.array(trans_noise_range)
 label = torch.cat((
     torch.tensor(norm_rota_noise, dtype=torch.float32, device=device),
     torch.tensor(norm_tran_noise, dtype=torch.float32, device=device)
 ), dim=1)
-model.load_state_dict(torch.load(r"/registration\final_model_RLAT.pth", map_location=torch.device('cpu')))
+model.load_state_dict(torch.load(r"../data/reg_model/mix1_model.pth", map_location=torch.device('cpu')))
 model.eval()
 with torch.no_grad():
     outputs = model(img)
-    pre_rota, pre_trans = label_transformer.label2real(outputs)
-    tru_rota, tru_trans = label_transformer.label2real(label)
+    pre_rota, pre_trans = label_transformer_mix.label2real(outputs)
+    tru_rota, tru_trans = label_transformer_mix.label2real(label)
     i=0
     print("Predicted rotation:", pre_rota[i])
     print("True rotation:    ", tru_rota[i])
@@ -142,5 +149,7 @@ with torch.no_grad():
     print("True trans:       ", tru_trans[i])
 pose = convert(pre_rota, pre_trans, parameterization="euler_angles", convention="ZXY", degrees=True)
 extrinsic = (drr.detector.reorient.compose(pose)).inverse()
+rt_ct2o = extrinsic.matrix.cpu().numpy().squeeze(0)
 print("世界到光源")
 print(extrinsic.matrix)
+print(rt_ct2o)

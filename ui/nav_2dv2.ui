@@ -45,7 +45,7 @@
           </size>
          </property>
          <property name="currentIndex">
-          <number>1</number>
+          <number>2</number>
          </property>
          <widget class="QWidget" name="tab_3">
           <attribute name="title">
@@ -166,7 +166,7 @@
               <item row="0" column="0">
                <widget class="QPushButton" name="import_img_btn">
                 <property name="text">
-                 <string>导入图像</string>
+                 <string>加载图像</string>
                 </property>
                </widget>
               </item>
@@ -192,9 +192,16 @@
                </widget>
               </item>
               <item row="0" column="1">
-               <widget class="QPushButton" name="update_voxel_model_btn">
+               <widget class="QPushButton" name="import_voxel_model_btn">
                 <property name="text">
-                 <string>模型更新</string>
+                 <string>加载模型</string>
+                </property>
+               </widget>
+              </item>
+              <item row="0" column="2">
+               <widget class="QPushButton" name="reg_model_btn">
+                <property name="text">
+                 <string>模型配准</string>
                 </property>
                </widget>
               </item>

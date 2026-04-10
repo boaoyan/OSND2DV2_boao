@@ -1,0 +1,54 @@
+import torch
+
+class LabelTransformMix2:
+    def __init__(self, norm_params):
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.trans_noise_norm = torch.tensor(
+            norm_params['trans_noise_norm'],
+            dtype=torch.float32,
+            device=self.device
+        )
+        self.rota_noise_norm = torch.tensor(
+            norm_params['rota_noise_norm'],
+            dtype=torch.float32,
+            device=self.device
+        )
+
+
+    def label2real(self, label):
+        """
+        将标签（噪声值）转换为真值（真实的旋转和平移参数）。
+        :param label: 包含噪声的标签，形状为 [batch_size, 6] 或 [6]，
+                      分别表示 rx_noise, ry_noise, rz_noise, tx_noise, ty_noise, tz_noise。
+        :return: 真实的旋转和平移参数，形状与输入相同。
+        """
+        # 确保输入是 PyTorch 张量且在正确设备上
+        if not isinstance(label, torch.Tensor):
+            label = torch.tensor(label, dtype=torch.float32, device=self.device)
+        else:
+            label = label.to(self.device)
+
+        label = torch.clamp(label, -1.0, 1.0)
+        # 解析标签
+        rx_noise = label[..., 0]  # 提取 rx_noise
+        ry_noise = label[..., 1]  # 提取 ry_noise
+        rz_noise = label[..., 2]  # 提取 rz_noise
+        tx_noise = label[..., 3]  # 提取 tx_noise
+        ty_noise = label[..., 4]  # 提取 ty_noise
+        tz_noise = label[..., 5]  # 提取 tz_noise
+
+        # 计算真实的旋转参数
+        rx_true = rx_noise * self.rota_noise_norm[0]
+        ry_true = ry_noise * self.rota_noise_norm[1]
+        rz_true = rz_noise * self.rota_noise_norm[2]
+
+        # 计算真实的平移参数
+        tx_true = tx_noise * self.trans_noise_norm[0]
+        ty_true = ty_noise * self.trans_noise_norm[1]
+        tz_true = tz_noise * self.trans_noise_norm[2]
+
+        # 返回真值
+        rot = torch.stack([rx_true, ry_true, rz_true], dim=-1)  # shPAe: [..., 3]
+        trans = torch.stack([tx_true, ty_true, tz_true], dim=-1)  # shPAe: [..., 3]
+
+        return rot, trans

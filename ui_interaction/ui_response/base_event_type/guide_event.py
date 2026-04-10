@@ -1,9 +1,13 @@
 import numpy as np
+from PyQt5.QtCore import pyqtSignal
 from PyQt5.QtWidgets import QPushButton, QLabel
 
+from camera_communication.kalman_filter_template import KalmanFilterTemplate
 from ui_interaction.ui_build.CompositeControl.message_box import messageBox
 from ui_interaction.ui_response.utils.math_transform import get_line, get_coord_in_ct, get_pixel_from_ct, \
     get_point_in_ct
+from ui_interaction.ui_response.utils.quaternion_rotation_transform import quaternion_to_rt_matrix, \
+    rt_matrix_to_quaternion_pose
 from ui_interaction.ui_response.utils.registration_algorithm import kabsch_numpy
 from view2D.view_manager import ViewerManager
 from view2D.view_render import ViewRender
@@ -14,10 +18,12 @@ class GuideEvent:
                  start_gui_btn: QPushButton, finish_gui_btn: QPushButton, cancel_gui_btn: QPushButton,
                  a_arm: str, sz_view_render: ViewRender, sc_view_render: ViewRender,
                  ct_pos_label: QLabel, world_aim_pos_label: QLabel, balls_in_ct, vox_space):
+        self.init_para = init_para
         self.voxel_load_clip_ui = init_para.voxel_load_clip_ui
         self.view_manager = view_manager
         self.sz_view_render = sz_view_render
         self.sc_view_render = sc_view_render
+        self.filter_temp = KalmanFilterTemplate()
 
         self.start_gui_btn = start_gui_btn
         self.finish_gui_btn = finish_gui_btn
@@ -127,9 +133,13 @@ class GuideEvent:
             self.ct_pos_label.setText(f'({self.saved_ct_coords[0]:.2f}, '
                                       f'{self.saved_ct_coords[1]:.2f}, '
                                       f'{self.saved_ct_coords[2]:.2f})')
+            # real_uv1, real_uv2 = get_pixel_from_ct(self.saved_ct_coords,
+            #                                        self.sz_view_render.rt_ct2o,
+            #                                        self.sc_view_render.rt_ct2o,
+            #                                        self.a_arm)
             real_uv1, real_uv2 = get_pixel_from_ct(self.saved_ct_coords,
-                                                   self.sz_view_render.rt_ct2o,
-                                                   self.sc_view_render.rt_ct2o,
+                                                   self.init_para.rt_ct2o_sz,
+                                                   self.init_para.rt_ct2o_sc,
                                                    self.a_arm)
             self.reset_plan_views()
             self.sz_view_render.update_real_uv(real_uv1)
@@ -150,17 +160,38 @@ class GuideEvent:
 
         self.view_manager.update_activated_view(activated_view)
 
+        # # 判断激活的是哪个视图
+        # if activated_view is self.sz_view_render:
+        #     src_view = self.sz_view_render
+        #     dst_view = self.sc_view_render
+        #     view_type = 'sz'
+        #     line_color = 'cyan'
+        # elif activated_view is self.sc_view_render:
+        #     src_view = self.sc_view_render
+        #     dst_view = self.sz_view_render
+        #     view_type = 'sc'
+        #     line_color = 'green'
+        # else:
+        #     return  # 激活的不是已知视图，不处理
+        #
+        # uv = src_view.real_uv
+        # if uv is None:
+        #     return  # 没有有效坐标，不处理
         # 判断激活的是哪个视图
         if activated_view is self.sz_view_render:
             src_view = self.sz_view_render
             dst_view = self.sc_view_render
+            rt_ct2o_act = self.init_para.rt_ct2o_sz
+            rt_ct2o_not = self.init_para.rt_ct2o_sc
             view_type = 'sz'
-            line_color = 'red'
+            line_color = 'cyan'
         elif activated_view is self.sc_view_render:
             src_view = self.sc_view_render
             dst_view = self.sz_view_render
+            rt_ct2o_act = self.init_para.rt_ct2o_sc
+            rt_ct2o_not = self.init_para.rt_ct2o_sz
             view_type = 'sc'
-            line_color = 'blue'
+            line_color = 'green'
         else:
             return  # 激活的不是已知视图，不处理
 
@@ -171,21 +202,28 @@ class GuideEvent:
         u, v = uv
 
         # print("u, v: ", u, v)
-        oct_source, pct = get_point_in_ct(u, v, src_view.rt_ct2o, self.a_inv, self.L)
+        oct_source, pct = get_point_in_ct(u, v, rt_ct2o_act, self.a_inv, self.L)
         self.voxel_load_clip_ui.show_line_in_ct(oct_source, pct, view_type, line_color)
         slope, intercept = get_line(u, v,
-                                    src_view.rt_ct2o, dst_view.rt_ct2o,
+                                    rt_ct2o_act, rt_ct2o_not,
                                     self.a_arm, self.a_inv, self.L)
         dst_view.draw_pj_line(slope, intercept, line_color)
         # 如果两个点都确定了，则可以返回实际CT体素坐标
         if src_view.real_uv is not None and dst_view.real_uv is not None:
+            # self.current_ct_coords_old = get_coord_in_ct(self.sz_view_render.real_uv,
+            #                                          self.sc_view_render.real_uv,
+            #                                          self.init_para.rt_ct2o_sz,
+            #                                          self.init_para.rt_ct2o_sc,
+            #                                          self.a_inv,
+            #                                          self.L)
             self.current_ct_coords = get_coord_in_ct(self.sz_view_render.real_uv,
                                                      self.sc_view_render.real_uv,
-                                                     self.sz_view_render.rt_ct2o,
-                                                     self.sc_view_render.rt_ct2o,
+                                                     self.init_para.rt_ct2o_sz,
+                                                     self.init_para.rt_ct2o_sc,
                                                      self.a_inv,
                                                      self.L)
             self.voxel_load_clip_ui.show_selected_point(self.current_ct_coords)
+
             if self.current_ct_coords is not None:
                 self.ct_pos_label.setText(f'({self.current_ct_coords[0]:.2f}, '
                                           f'{self.current_ct_coords[1]:.2f}, '
@@ -193,4 +231,13 @@ class GuideEvent:
 
     def update_rt_ct2cam(self, balls_in_cam):
         self.rt_ct2cam = kabsch_numpy(self.balls_in_ct, balls_in_cam)
+        # rt_ct2cam = kabsch_numpy(self.balls_in_ct, balls_in_cam)
+        # qua_ct2cam = rt_matrix_to_quaternion_pose(rt_ct2cam)
+        # # rt_ct2cam_new = quaternion_to_rt_matrix(qua_ct2cam)
+        # qua_ct2cam_filter = self.filter_temp.update(qua_ct2cam)
+        # self.init_para._on_correlated_data(qua_ct2cam, qua_ct2cam_filter)
+        # self.rt_ct2cam = quaternion_to_rt_matrix(qua_ct2cam_filter)
+
+        # print("rt_ct2cam: ", rt_ct2cam)
+        # print("filter_rt_ct2cam: ", self.rt_ct2cam)
         self.update_guide_pos_in_cam()

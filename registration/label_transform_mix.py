@@ -1,21 +1,19 @@
 import torch
 
-class LabelTransform:
+class LabelTransformMix:
     def __init__(self, train_params):
-        pose_params = None
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        if train_params['standard_pose'] == "PA":
-            pose_params = train_params['PA']
-        elif train_params['standard_pose'] == "RLAT":
-            pose_params = train_params['RLAT']
-        if pose_params is not None:
-            # 将初始姿态和噪声范围转换为 PyTorch 张量
-            # self.trans_noise_range = torch.tensor(pose_params['trans_noise_range'])
-            # self.rota_noise_range = torch.tensor(pose_params['rota_noise_range'])
-            self.trans_noise_range = torch.tensor(pose_params['trans_noise_range'])
-            self.rota_noise_range = torch.tensor(pose_params['rota_noise_range'])
-            self.trans_noise_range = self.trans_noise_range.to(self.device)
-            self.rota_noise_range = self.rota_noise_range.to(self.device)
+        self.trans_noise_range = torch.tensor(
+            train_params['trans_noise_range'],
+            dtype=torch.float32,
+            device=self.device
+        )
+        self.rota_noise_range = torch.tensor(
+            train_params['rota_noise_range'],
+            dtype=torch.float32,
+            device=self.device
+        )
+
 
     def label2real(self, label):
         """
@@ -24,10 +22,13 @@ class LabelTransform:
                       分别表示 rx_noise, ry_noise, rz_noise, tx_noise, ty_noise, tz_noise。
         :return: 真实的旋转和平移参数，形状与输入相同。
         """
-        # 确保输入是 PyTorch 张量
+        # 确保输入是 PyTorch 张量且在正确设备上
         if not isinstance(label, torch.Tensor):
-            label = torch.tensor(label, dtype=torch.float32)
+            label = torch.tensor(label, dtype=torch.float32, device=self.device)
+        else:
+            label = label.to(self.device)
 
+        label = torch.clamp(label, -1.0, 1.0)
         # 解析标签
         rx_noise = label[..., 0]  # 提取 rx_noise
         ry_noise = label[..., 1]  # 提取 ry_noise

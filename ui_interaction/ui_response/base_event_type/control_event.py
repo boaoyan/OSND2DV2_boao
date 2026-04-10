@@ -6,6 +6,7 @@ from camera_communication.get_cam_data import UdpReceiverThread
 from robot_arm import RobotArmControl
 from robot_arm.utils.iterate_move_control import get_distance_to_line
 from ui_interaction.ui_response.utils.math_transform import get_pixel_from_ct, get_pj_pt
+from ui_interaction.ui_response.utils.reg_rt_transform import reg_rt_transform, reg_rt_update
 from ui_interaction.ui_response.utils.visual_funcs import plot_line_and_point, plot_5_points, plot_coordinate_frames
 from view2D.view_render import ViewRender
 
@@ -48,13 +49,18 @@ class ControlEvent:
                  fix_error_btn: QPushButton,
                  cali_wait_timer: QTimer,
                  result_visual_timer: QTimer,
-                 result_judge_timer:QTimer):
+                 result_judge_timer:QTimer,
+                 reg_model_btn:QPushButton):
+        self.init_para = init_para
         self.voxel_load_clip_ui = init_para.voxel_load_clip_ui
         self.sz_view_render = sz_view_render
         self.sc_view_render = sc_view_render
         self.camera_thread = camera_thread
         self.camera_thread.data_refreshed.connect(self.update_ui_info)
 
+
+
+        self.show_real_pin_enabled = False
         # 正侧位视图的投影参数
         self.a_arm = np.load(a_arm)
         self.a_inv = np.linalg.inv(self.a_arm)
@@ -65,7 +71,8 @@ class ControlEvent:
         # ui控件相关
         self.dire_cam_pos_label = dire_cam_pos_label
         self.pin_cam_pos_label = pin_cam_pos_label
-
+        self.reg_model_btn = reg_model_btn
+        self.reg_model_btn.clicked.connect(self.reg_model)
         # 机械臂控制相关
         self.arm_control = RobotArmControl(robot_arm_param)
         self.connect_device_btn = connect_device_btn
@@ -101,6 +108,10 @@ class ControlEvent:
         self.fix_error_btn.clicked.connect(self.fix_error)
 
 
+    def reg_model(self):
+        # QTimer.singleShot(1000, lambda: setattr(self, 'show_real_pin_enabled', True))
+        self.show_real_pin_enabled = True
+
     def connect_serial(self):
         self.camera_thread.start_listening()
         self.arm_control.connect_arm_serial()
@@ -109,6 +120,18 @@ class ControlEvent:
         if self.rt_cam2ct is None:
             print("rt_cam2ct is None, 无法投影真实针到体素坐标系中")
             return
+        # if not self.show_real_pin_enabled:
+        #     # 不显示针：可选择清除已有显示（可选）
+        #     # self.voxel_load_clip_ui.hide_pin_in_ct()  # 如果有 hide 方法
+        #     return
+        # data = self.camera_thread.pin_balls_in_cam
+        # if data is not None:
+        #     print("Shape:", data.shape)
+        #     print("Data:\n", data)
+        #     real_dire_in_cam = data[0]
+        #     real_pin_in_cam = data[1]
+        #     print("real_dire_in_cam:", real_dire_in_cam, "shape:", real_dire_in_cam.shape)
+        #     print("real_pin_in_cam:", real_pin_in_cam, "shape:", real_pin_in_cam.shape)
         if self.camera_thread.pin_balls_in_cam is not None:
             real_dire_in_cam = self.camera_thread.pin_balls_in_cam[1]
             real_pin_in_cam = self.camera_thread.pin_balls_in_cam[0]
@@ -117,14 +140,22 @@ class ControlEvent:
 
             self.voxel_load_clip_ui.show_pin_in_ct(real_dire_in_ct, real_pin_in_ct)
             # 针尾在两个坐标系下的坐标
+            # real_dire_uv1, real_dire_uv2 = get_pixel_from_ct(real_dire_in_ct,
+            #                                                  self.sz_view_render.rt_ct2o,
+            #                                                  self.sc_view_render.rt_ct2o,
+            #                                                  self.a_arm)
             real_dire_uv1, real_dire_uv2 = get_pixel_from_ct(real_dire_in_ct,
-                                                             self.sz_view_render.rt_ct2o,
-                                                             self.sc_view_render.rt_ct2o,
+                                                             self.init_para.rt_ct2o_sz,
+                                                             self.init_para.rt_ct2o_sc,
                                                              self.a_arm)
             # 针尖在两个坐标系下的坐标
+            # real_pin_uv1, real_pin_uv2 = get_pixel_from_ct(real_pin_in_ct,
+            #                                                self.sz_view_render.rt_ct2o,
+            #                                                self.sc_view_render.rt_ct2o,
+            #                                                self.a_arm)
             real_pin_uv1, real_pin_uv2 = get_pixel_from_ct(real_pin_in_ct,
-                                                           self.sz_view_render.rt_ct2o,
-                                                           self.sc_view_render.rt_ct2o,
+                                                           self.init_para.rt_ct2o_sz,
+                                                           self.init_para.rt_ct2o_sc,
                                                            self.a_arm)
 
             self.sz_view_render.set_real_pin(real_pin_uv1, real_dire_uv1)
@@ -142,9 +173,19 @@ class ControlEvent:
         self.update_real_pin()
 
     def update_ui_info(self):
+        # data = self.camera_thread.pin_balls_in_cam
+        # if data is not None:
+        #     print("Shape:", data.shape)
+        #     print("Data:\n", data)
+        #     real_dire_in_cam = data[0]
+        #     real_pin_in_cam = data[1]
+        #     print("real_dire_in_cam:", real_dire_in_cam, "shape:", real_dire_in_cam.shape)
+        #     print("real_pin_in_cam:", real_pin_in_cam, "shape:", real_pin_in_cam.shape)
         if self.camera_thread.pin_balls_in_cam is not None:
-            real_dire_in_cam = self.camera_thread.pin_balls_in_cam[0]
-            real_pin_in_cam = self.camera_thread.pin_balls_in_cam[1]
+            # print("pin_balls_in_cam:",self.camera_thread.pin_balls_in_cam)
+            real_dire_in_cam = self.camera_thread.pin_balls_in_cam[1]
+            real_pin_in_cam = self.camera_thread.pin_balls_in_cam[0]
+
             self.dire_cam_pos_label.setText(f'({real_dire_in_cam[0]:.2f}, '
                                             f'{real_dire_in_cam[1]:.2f}, '
                                             f'{real_dire_in_cam[2]:.2f})')
@@ -158,7 +199,7 @@ class ControlEvent:
         pos_a = self.arm_control.cali_a_sequence[self.arm_control.current_cali_pos_index]
         pos_b = self.arm_control.cali_b_sequence[self.arm_control.current_cali_pos_index]
         self.arm_control.move(pos_a, pos_b)
-        self.cali_wait_timer.start(5000)
+        self.cali_wait_timer.start(2000)
 
     def cali_arm_again(self):
         self.arm_control.current_cali_pos_index += 1
@@ -180,7 +221,7 @@ class ControlEvent:
             print("aim_in_cam is None, 无法控制机械臂指向目标点")
             return
         self.arm_control.control_to_aim(self.aim_in_cam[:3])
-        self.result_visual_timer.start(2000)
+        self.result_visual_timer.start(4000)
 
     def fix_error(self):
         if self.previous_distance < 0.5:
@@ -192,10 +233,10 @@ class ControlEvent:
             pj_pt = get_pj_pt(aim_in_cam, P0, P1)
             aim_in_cam1 = 2*aim_in_cam - pj_pt
             # aim_in_cam2 = aim_in_cam - pj_pt + aim_in_cam
-            plot_5_points(P0, P1, aim_in_cam, pj_pt, aim_in_cam1)
+            # plot_5_points(P0, P1, aim_in_cam, pj_pt, aim_in_cam1)
             self.arm_control.control_to_aim(aim_in_cam1)
 
-            self.result_judge_timer.start(1000)
+            self.result_judge_timer.start(2000)
 
 
     def result_judge(self):
@@ -220,8 +261,9 @@ class ControlEvent:
     def result_visual(self):
         P0 = self.camera_thread.pin_balls_in_cam[0]
         P1 = self.camera_thread.pin_balls_in_cam[1]
-        plot_line_and_point(P0, P1, self.aim_in_cam[:3])
+
         current_distance = get_distance_to_line(self.aim_in_cam[:3], P0, P1)
+        plot_line_and_point(P0, P1, self.aim_in_cam[:3], current_distance)
         print("目标点到投影点的距离：", current_distance)
 
         self.previous_distance = current_distance

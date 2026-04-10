@@ -39,7 +39,7 @@ class DRR(nn.Module):
             x0: float = 0.0,  # Principal point X offset (pixels)
             y0: float = 0.0,  # Principal point Y offset (pixels)
             reshape: bool = True,  # Whether to reshape output to (batch, 1, height, width)
-            reverse_x_axis: bool = False,  # Whether to flip X-axis for radiologic convention
+            reverse_x_axis: bool = True,  # Whether to flip X-axis for radiologic convention
             renderer: str = "siddon",  # Rendering backend ("siddon" or "trilinear")
             persistent: bool = True,  # Whether to persist buffers during state_dict()
             **renderer_kwargs,  # Additional renderer-specific parameters

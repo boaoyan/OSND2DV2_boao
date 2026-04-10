@@ -84,7 +84,7 @@ class VoxelLoadClipWidget(QWidget):
         self.plotter.add_points(
             point_array,
             color='red',  # 颜色（可选）
-            point_size=10,  # 点大小
+            point_size=15,  # 点大小
             render_points_as_spheres=True,  # 渲染为球体（更美观）
             name='selected_point'  # 命名以便后续更新/删除
         )
@@ -126,9 +126,9 @@ class VoxelLoadClipWidget(QWidget):
         # # 4. 绘制
         # pct = np.array([-pct[0], pct[1], -pct[2]])
         # oct_source = np.array([pct[0], oct_source[1], pct[2]])
-        print('pct, oct_source',pct, oct_source)
+        # print('pct, oct_source',pct, oct_source)
         line = pv.Line(oct_source, pct)
-        self.plotter.add_mesh(line, color=color, line_width=1.5, name=line_name)
+        self.plotter.add_mesh(line, color=color, line_width=1, name=line_name)
 
         # 光源点（绿色）
 
@@ -174,8 +174,8 @@ class VoxelLoadClipWidget(QWidget):
         ray_line = pv.Line(real_dire_in_ct, ray_end)
         self.plotter.add_mesh(
             ray_line,
-            color='cyan',
-            line_width=2,
+            color='red',
+            line_width=3,
             name='surgical_pin_ray'
         )
 

@@ -3,7 +3,7 @@ import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 
 
-def plot_line_and_point(P1, P2, aim_in_cam, extend_ratio=2.0, show_perpendicular=True,
+def plot_line_and_point(P1, P2, aim_in_cam, current_distance, extend_ratio=2.0, show_perpendicular=True,
                         title="3D Line and Target Point"):
     """
     绘制由 P1, P2 定义的直线（含延长线）和目标点 aim_in_cam
@@ -78,7 +78,8 @@ def plot_line_and_point(P1, P2, aim_in_cam, extend_ratio=2.0, show_perpendicular
     ax.set_ylabel("Y")
     ax.set_zlabel("Z")
     ax.legend()
-    ax.set_title(title)
+    ax.set_title(f"{title}\ntarget error:{current_distance:.3f}")
+    # ax.set_title(title)
 
     # 保持比例一致（可选）
     max_range = np.array([

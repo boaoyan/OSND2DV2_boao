@@ -86,7 +86,8 @@ class GridModel(nn.Module):
                     act_layer=act_layer,
                     norm_layer=norm_layer,
                 ),
-                SelectAdaptivePool2d(pool_type='avg', flatten=True)
+                SelectAdaptivePool2d(pool_type='avg', flatten=True),
+                nn.Tanh(),
             )
         else:
             self.head = nn.Sequential(
@@ -94,6 +95,7 @@ class GridModel(nn.Module):
                 GroupNormAct(1280, group_size=8, act_layer=act_layer),
                 SelectAdaptivePool2d(pool_type='avg', flatten=True),
                 nn.Linear(1280, num_classes),
+                nn.Tanh(),
             )
 
     def forward(self, x):
@@ -102,46 +104,46 @@ class GridModel(nn.Module):
         x = self.head(x)
         return x
 
-if __name__ == '__main__':
-    # 定义所有布尔组合
-    keys = ['edffn', 'eca', 'conv_mlp']
-    combinations = list(product([True, False], repeat=3))
-
-    # 汇总结果
-    results = []
-
-    # 输入张量（1通道，224x224）
-    x = torch.randn(1, 1, 224, 224)
-
-    print(f"{'Config':<30} {'Params(M)':<12} {'FLOPs(G)':<10} {'Output Shape'}")
-    print("-" * 60)
-
-    for combo in combinations:
-        model_config = dict(zip(keys, combo))
-        # 构建模型
-        model = GridModel(model_config, num_classes=6, in_channel=1)
-        model.eval()
-
-        # 参数统计
-        params = sum(p.numel() for p in model.parameters())
-
-        # FLOPs 统计
-        flops, _ = profile(model, inputs=(x,), verbose=False)
-
-        # 前向传播
-        with torch.no_grad():
-            out = model(x)
-
-        # 格式化配置名
-        config_str = f"edffn={combo[0]}, eca={combo[1]}, mlp={combo[2]}"
-        results.append({
-            'config': config_str,
-            'params': params,
-            'flops': flops,
-            'output_shape': out.shape
-        })
-
-        # 打印当前行
-        print(f"{config_str:<30} {params / 1e6:.2f}M       {flops / 1e9:.2f}G       {tuple(out.shape)}")
-
-    print("-" * 60)
+# if __name__ == '__main__':
+#     # 定义所有布尔组合
+#     keys = ['edffn', 'eca', 'conv_mlp']
+#     combinations = list(product([True, False], repeat=3))
+#
+#     # 汇总结果
+#     results = []
+#
+#     # 输入张量（1通道，224x224）
+#     x = torch.randn(1, 1, 224, 224)
+#
+#     print(f"{'Config':<30} {'Params(M)':<12} {'FLOPs(G)':<10} {'Output Shape'}")
+#     print("-" * 60)
+#
+#     for combo in combinations:
+#         model_config = dict(zip(keys, combo))
+#         # 构建模型
+#         model = GridModel(model_config, num_classes=6, in_channel=1)
+#         model.eval()
+#
+#         # 参数统计
+#         params = sum(p.numel() for p in model.parameters())
+#
+#         # FLOPs 统计
+#         flops, _ = profile(model, inputs=(x,), verbose=False)
+#
+#         # 前向传播
+#         with torch.no_grad():
+#             out = model(x)
+#
+#         # 格式化配置名
+#         config_str = f"edffn={combo[0]}, eca={combo[1]}, mlp={combo[2]}"
+#         results.append({
+#             'config': config_str,
+#             'params': params,
+#             'flops': flops,
+#             'output_shape': out.shape
+#         })
+#
+#         # 打印当前行
+#         print(f"{config_str:<30} {params / 1e6:.2f}M       {flops / 1e9:.2f}G       {tuple(out.shape)}")
+#
+#     print("-" * 60)
