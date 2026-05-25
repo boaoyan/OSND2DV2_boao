@@ -76,12 +76,14 @@ batch_size = global_config['batch_size']
 rota_noise_range = torch.tensor(global_config['noise_params']['rota_noise_range'])
 trans_noise_range = torch.tensor(global_config['noise_params']['trans_noise_range'])
 label_transformer_mix = LabelTransformMix(global_config['noise_params'])
-volume_dir_2 = r"../data/spine107_img.nii.gz"
+volume_dir_2 = r"../data/voxel_data/uniformed_liver_13.nii.gz"
 
 subject = read(volume_dir_2, bone_attenuation_multiplier=1.0, orientation='RLAT', sid=500)
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
+# 获取体素数据的形状 (C, D, H, W)
+volume_shape = subject.volume.data.shape
+print(f"Volume shape: {volume_shape}")
 
 delx = 0.469
 height = 512

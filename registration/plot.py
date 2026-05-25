@@ -37,7 +37,7 @@ if __name__ == '__main__':
     # Read in the volume and get its origin and spacing in world coordinates
     # subject = load_example_ct(orientation="AP")
     # volume_dir = "data/CT25/lum_25.nii.gz"
-    volume_dir_2 = r"../data/spine107_img.nii.gz"
+    volume_dir_2 = r"../data/voxel_data/uniformed_liver_6.nii.gz"
     subject = read(volume_dir_2, sid=500, orientation="RLAT")
 
     # Initialize the DRR module for generating synthetic X-rays
@@ -74,10 +74,10 @@ if __name__ == '__main__':
     print("体素原点在像平面")
     print(pt_in_plane)
 
-    unit = np.eye(4)
-    unit_tensor = torch.tensor(unit, dtype=torch.float32, device=device)
-    res = drr.affine_inverse(unit_tensor)
-    print(res)
+    # unit = np.eye(4)
+    # unit_tensor = torch.tensor(unit, dtype=torch.float32, device=device)
+    # res = drr.affine_inverse(unit_tensor)
+    # print(res)
 
     img = drr(rotations, translations, parameterization="euler_angles", convention="ZXY", degrees=True)
     img = normalize_to_255(img)

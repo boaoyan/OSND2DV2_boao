@@ -345,7 +345,7 @@ def run_single_pose(standard_pose: str,
     return mix_result, pose_result
 
 global_config = init_config()
-volume_path = r"../data/spine107_img.nii.gz"
+volume_path = r"../data/voxel_data/spine107_img.nii.gz"
 
 # 创建保存目录
 save_dir = "../data/output_results"

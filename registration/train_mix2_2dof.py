@@ -11,8 +11,8 @@ from grid_efficientnet.grid_efficientb0_model import GridModel
 from projector.drr import DRR
 from projector.read_data import read
 from projector.pose import convert
-from registration.label_transform_mix_2 import LabelTransformMix2
-from registration.math_process.get_noise_label import get_transformer_noise, get_transformer_noise_vector
+from label_transform_mix_2 import LabelTransformMix2
+from math_process.get_noise_label import get_transformer_noise, get_transformer_noise_vector
 
 
 def norm_img(img):
@@ -51,7 +51,7 @@ def norm_label(rot_noise, trans_noise):
     return rot_norm, trans_norm
 def init_config():
     return {
-        "batch_size": 4,
+        "batch_size": 16,
         "lr": 5e-4,
         "device": "cuda" if torch.cuda.is_available() else "cpu",
         "delx": 0.469,
@@ -79,45 +79,85 @@ def init_config():
             'conv_mlp': 0
         },
         "noise_params": {
-            'trans_noise_range': [25, 25, 25],
-            'rota_noise_range': [5, 5, 5]
+            'trans_noise_range': [25, 25, 0],
+            'rota_noise_range': [0, 0, 0]
         },
         "norm_params":{
             'trans_noise_norm':[25, 25, 25],
-            'rota_noise_norm':[10, 10, 10]
+            'rota_noise_norm':[1, 1, 1]
         }
     }
 
 
-def get_mse_loss(config, label_transformer_mix, labels, outputs, pts):
-    # 1️⃣ 获取 pts 的设备（作为基准设备）
-    device = outputs.device  # ← 以模型输出为基准（通常在 GPU）
-    pts = pts.to(device)  # ← 确保 pts 在同一设备
+# def get_mse_loss(config, label_transformer_mix, labels, outputs, pts):
+#     # 1️⃣ 获取 pts 的设备（作为基准设备）
+#     device = outputs.device  # ← 以模型输出为基准（通常在 GPU）
+#     pts = pts.to(device)  # ← 确保 pts 在同一设备
+#
+#     pre_rota, pre_trans = label_transformer_mix.label2real(outputs)
+#     tru_rota, tru_trans = label_transformer_mix.label2real(labels)
+#
+#     # 2️⃣ 转换得到 pose 对象
+#     tru_pose = convert(tru_rota, tru_trans, parameterization="euler_angles", convention="ZXY", degrees=True)
+#     pre_pose = convert(pre_rota, pre_trans, parameterization="euler_angles", convention="ZXY", degrees=True)
+#
+#     # 3️⃣ 🔥 关键修复：将 rotation 和 translation 迁移到 pts 同一设备
+#     tru_rotation = tru_pose.rotation.mT.to(device)
+#     pre_rotation = pre_pose.rotation.mT.to(device)
+#     tru_translation = tru_pose.translation.to(device)
+#     pre_translation = pre_pose.translation.to(device)
+#
+#     # 4️⃣ 执行矩阵运算（现在所有张量都在同一设备）
+#     tru_pts = torch.matmul(tru_rotation, pts.T)
+#     pre_pts = torch.matmul(pre_rotation, pts.T)
+#
+#     # 5️⃣ 计算损失
+#     trans_loss = F.mse_loss(tru_translation, pre_translation)
+#     loss = F.mse_loss(tru_pts, pre_pts) + trans_loss
+#     loss = config["weight_loss"] * loss
+#
+#     return loss
 
-    pre_rota, pre_trans = label_transformer_mix.label2real(outputs)
-    tru_rota, tru_trans = label_transformer_mix.label2real(labels)
+def get_mse_loss_2dof(config, label_transformer, labels, outputs, pts,
+                      valid_trans_dims=[0, 2], valid_rot_dims=None):
+    """
+    valid_trans_dims: 有效的平移维度 [0]=X, [1]=Y, [2]=Z
+    valid_rot_dims: 有效的旋转维度，None表示完全忽略旋转loss
+    """
+    device = outputs.device
+    pts = pts.to(device)
 
-    # 2️⃣ 转换得到 pose 对象
-    tru_pose = convert(tru_rota, tru_trans, parameterization="euler_angles", convention="ZXY", degrees=True)
-    pre_pose = convert(pre_rota, pre_trans, parameterization="euler_angles", convention="ZXY", degrees=True)
+    pre_rota, pre_trans = label_transformer.label2real(outputs)
+    tru_rota, tru_trans = label_transformer.label2real(labels)
 
-    # 3️⃣ 🔥 关键修复：将 rotation 和 translation 迁移到 pts 同一设备
-    tru_rotation = tru_pose.rotation.mT.to(device)
-    pre_rotation = pre_pose.rotation.mT.to(device)
-    tru_translation = tru_pose.translation.to(device)
-    pre_translation = pre_pose.translation.to(device)
+    # ✅ 平移loss：只计算有效维度
+    trans_loss = F.mse_loss(
+        tru_trans[:, valid_trans_dims],
+        pre_trans[:, valid_trans_dims]
+    )
 
-    # 4️⃣ 执行矩阵运算（现在所有张量都在同一设备）
-    tru_pts = torch.matmul(tru_rotation, pts.T)
-    pre_pts = torch.matmul(pre_rotation, pts.T)
+    # ✅ 旋转loss：可选弱化或完全忽略
+    if valid_rot_dims is not None and len(valid_rot_dims) > 0:
+        rot_loss = F.mse_loss(
+            tru_rota[:, valid_rot_dims],
+            pre_rota[:, valid_rot_dims]
+        ) * 1e-3  # 弱化权重
+    else:
+        rot_loss = torch.tensor(0.0, device=device)  # 完全忽略
 
-    # 5️⃣ 计算损失
-    trans_loss = F.mse_loss(tru_translation, pre_translation)
-    loss = F.mse_loss(tru_pts, pre_pts) + trans_loss
-    loss = config["weight_loss"] * loss
+    # ✅ 点变换loss：使用零旋转 + 有效平移计算
+    zero_rot = torch.zeros_like(tru_rota)
+    ref_pose = convert(zero_rot, tru_trans, parameterization="euler_angles",
+                       convention="ZXY", degrees=True)
+    pred_pose = convert(zero_rot, pre_trans, parameterization="euler_angles",
+                        convention="ZXY", degrees=True)
 
-    return loss
+    ref_pts = torch.matmul(ref_pose.rotation.mT.to(device), pts.T)
+    pred_pts = torch.matmul(pred_pose.rotation.mT.to(device), pts.T)
+    point_loss = F.mse_loss(ref_pts, pred_pts)
 
+    total_loss = config["weight_loss"] * (point_loss + trans_loss + rot_loss)
+    return total_loss
 
 def sample_cube_points(n, size=100):
     coords = np.arange(-(n // 2), n // 2 + 1, dtype=np.float32) * (size / (n - 1))  # shape: (n,)
@@ -150,7 +190,8 @@ delx = global_config['delx']
 batch_size = global_config['batch_size']
 
 label_transformer_mix = LabelTransformMix2(global_config['norm_params'])
-volume_dir_2 = r"../data/voxel_data/spine107_img.nii.gz"
+
+volume_dir_2 = r"data/voxel_data/uniformed_liver_6.nii.gz"
 
 subject_pa = read(volume_dir_2, bone_attenuation_multiplier=1.0, orientation='PA', sid=500)
 subject_rlat = read(volume_dir_2, bone_attenuation_multiplier=1.0, orientation='RLAT', sid=500)
@@ -184,11 +225,11 @@ scheduler = ReduceLROnPlateau(
 )
 
 # ===  统一配置保存路径 ===
-base_checkpoint_dir = "checkpoints_all_models"
+base_checkpoint_dir = "mix2_2dof_uliver6_model"
 os.makedirs(base_checkpoint_dir, exist_ok=True)
 
 # 子目录：每个模型独立文件夹（便于管理）
-checkpoint_dir_mix = os.path.join(base_checkpoint_dir, "mix_view")
+checkpoint_dir_mix = os.path.join(base_checkpoint_dir, "mix2_view")
 os.makedirs(checkpoint_dir_mix, exist_ok=True)
 
 
@@ -200,15 +241,13 @@ pts = sample_cube_points(3).to(device)
 assert batch_size % 2 == 0, "Batch size must be even to split 50/50"
 half_batch = batch_size // 2
 
-
 losses_mix = []
 best_loss_mix = float('inf')
-
 
 # 日志打印频率
 log_interval = global_config.get('log_interval', 100)  # 默认每 100 步打印一次
 
-for i in range(1):
+for i in range(max_steps):
 
     # --- PA 视角部分 ---
     rot_noise_pa = torch.empty(half_batch, 3, device=device).uniform_(-1.0, 1.0)
@@ -256,7 +295,7 @@ for i in range(1):
     # ================= 模型 1: 混合视角训练 =================
     model.train()
     output_mix = model(img_mix)
-    loss_mix = get_mse_loss(global_config, label_transformer_mix, label_mix, output_mix, pts)
+    loss_mix = get_mse_loss_2dof(global_config, label_transformer_mix, label_mix, output_mix, pts)
     loss_mix_val = loss_mix.item()
 
     optimizer.zero_grad()
@@ -307,7 +346,7 @@ for i in range(1):
             lbl_range = f"[{label_mix.min().item():.4f}, {label_mix.max().item():.4f}]"
             grad_norm = torch.norm(model.stem[0].weight.grad).item() if model.stem[0].weight.grad is not None else 0.0
 
-        print(f"[MIX_VIEW]  NEW BEST at Step {i + 1}!")
+        print(f"[MIX2_VIEW]  NEW BEST at Step {i + 1}!")
         print(f" Loss: {best_loss_mix:.8f} (↓{improvement:.2f}% vs prev best)")
         print(f" Output: {out_range} | Label: {lbl_range} | GradNorm: {grad_norm:.4f}")
 
@@ -330,7 +369,7 @@ torch.save(model.state_dict(), os.path.join(checkpoint_dir_mix, "final_model.pth
 # --- 保存 losses 日志 (JSON + TXT 双格式，便于绘图和查看) ---
 
 for name, losses, dir_path in [
-    ("mix_view", losses_mix, checkpoint_dir_mix)
+    ("mix2_view", losses_mix, checkpoint_dir_mix)
 ]:
     # JSON 格式（便于 Python 读取绘图）
     with open(os.path.join(dir_path, "losses.json"), "w") as f:
@@ -362,5 +401,5 @@ with open(os.path.join(base_checkpoint_dir, "training_summary.json"), "w") as f:
 print(f"\n✅ All models and logs saved to: {base_checkpoint_dir}")
 print(f"📁 Directory structure:")
 print(f"   {base_checkpoint_dir}/")
-print(f"   ├── mix_view/      → best_model.pth, final_model.pth, losses.json, losses.txt")
+print(f"   ├── mix2_view/      → best_model.pth, final_model.pth, losses.json, losses.txt")
 print(f"   └── training_summary.json")

@@ -50,7 +50,8 @@ vox_space = [0.3515625, 0.3515625, 1.0       ]
 
 [vox_image]
     vox_img_path = "data/spine107_img_cropped"
-    vox_nii_path = "data/spine107_img.nii.gz"
+    vox_nii_path = "data/voxel_data/spine107_img.nii.gz"
+#    vox_nii_path = "data/voxel_data/liver_6.nii.gz"
 
 [reg_model]
     front_model_path = "data/registration_model/final_model_PA.pth"

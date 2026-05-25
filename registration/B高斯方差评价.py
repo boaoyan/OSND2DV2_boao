@@ -8,6 +8,11 @@ from scipy import stats
 from registration.math_process.data_fusion import get_source_transform, get_base_noise, get_osz_noise
 
 
+
+
+
+
+
 def extract_pose_named_data(csv_paths,
                             rot_cols=['pre_rota_z', 'pre_rota_x', 'pre_rota_y'],
                             trans_cols=['pre_trans_x', 'pre_trans_y', 'pre_trans_z'],
@@ -118,24 +123,26 @@ def compute_pose_errors_unknown_mean(pre_rota, tru_rota, pre_trans, tru_trans,
     return results
 
 
-
 def reg_data_fusion(error1, error2,
                     pre_rota1, pre_trans1,
                     pre_rota2, pre_trans2,
-                    angle_unit='rad'):  # 🆕 保留参数兼容旧调用，但内部已忽略
+                    angle_unit='rad',
+                    rot_order=('rz', 'rx', 'ry')):  # 🆕 显式声明旋转列顺序
     """
-    6-DoF 位姿加权融合（线性加权，旋转直接使用角度加权）
+    6-DoF 位姿加权融合（已修复方差与预测值轴顺序不一致问题）
 
     Parameters
     ----------
     error1, error2 : dict 或 array
-        两组预测的每自由度方差。若为 dict 需含 ['rot/trans'][x/y/z]['var']
-    pre_rota1, pre_rota2 : array-like, shape (3,) or (N, 3)
-        旋转预测值 [roll, pitch, yaw]（单位任意，直接线性平均）
-    pre_trans1, pre_trans2 : array-like, shape (3,) or (N, 3)
-        平移预测值 [tx, ty, tz]
-    angle_unit : str
-        保留参数以防旧接口报错，实际已忽略角度转换与圆周融合逻辑
+        方差输入。数组顺序固定为: [rx, ry, rz, tx, ty, tz]
+    pre_rota1/2 : array-like, shape (N, 3)
+        旋转预测值。默认列顺序: ['rz', 'rx', 'ry']
+    pre_trans1/2 : array-like, shape (N, 3)
+        平移预测值。顺序: [tx, ty, tz]
+    angle_unit : str, default 'rad'
+        保留参数，实际按输入原始数值计算
+    rot_order : tuple, default ('rz', 'rx', 'ry')
+        旋转数据的实际列顺序，用于自动对齐方差
 
     Returns
     -------
@@ -143,26 +150,26 @@ def reg_data_fusion(error1, error2,
     fused_trans : np.ndarray, shape (3,) or (N, 3)
     """
 
-    # 🔧 内部辅助：将 dict 或 array 统一转为 (6,) 方差数组
+    # 🔧 内部辅助：解析方差
     def _parse_variance(err_input):
         if isinstance(err_input, dict):
             axes = ['x', 'y', 'z']
             try:
                 r_vars = [err_input['rot'][ax]['var'] for ax in axes]
                 t_vars = [err_input['trans'][ax]['var'] for ax in axes]
-                return np.array(r_vars + t_vars)
+                return np.array(r_vars + t_vars)  # 返回 [rx, ry, rz, tx, ty, tz]
             except KeyError as e:
-                raise ValueError(f"误差字典结构缺失键: {e}。需包含 rot/trans 下的 x,y,z.var")
+                raise ValueError(f"误差字典结构缺失键: {e}")
         else:
             return np.asarray(err_input, dtype=float)
 
-    # 统一转为 2D 方便向量化计算 (N, D)
+    # 统一转为 2D
     var1 = np.atleast_2d(_parse_variance(error1))
     var2 = np.atleast_2d(_parse_variance(error2))
-    r1   = np.atleast_2d(np.asarray(pre_rota1, dtype=float))
-    t1   = np.atleast_2d(np.asarray(pre_trans1, dtype=float))
-    r2   = np.atleast_2d(np.asarray(pre_rota2, dtype=float))
-    t2   = np.atleast_2d(np.asarray(pre_trans2, dtype=float))
+    r1 = np.atleast_2d(np.asarray(pre_rota1, dtype=float))
+    t1 = np.atleast_2d(np.asarray(pre_trans1, dtype=float))
+    r2 = np.atleast_2d(np.asarray(pre_rota2, dtype=float))
+    t2 = np.atleast_2d(np.asarray(pre_trans2, dtype=float))
 
     # 维度校验
     if var1.shape != var2.shape or var1.shape[1] != 6:
@@ -172,28 +179,33 @@ def reg_data_fusion(error1, error2,
     if r1.shape[1] != 3 or t1.shape[1] != 3:
         raise ValueError("Rot/Trans must be shape (3,) or (N, 3)")
 
-    # 🆕 已忽略角度单位转换，直接按原始数值计算
-
-    # 1. 计算权重 (向量化)
+    # 1. 计算基础权重
     total_var = var1 + var2
-    total_var = np.where(total_var == 0, 1e-12, total_var)  # 防除零
-    w1 = var2 / total_var  # 对应 error1 的权重
-    w2 = var1 / total_var  # 对应 error2 的权重 (w1 + w2 = 1)
+    total_var = np.where(total_var == 0, 1e-12, total_var)
+    w1 = var2 / total_var  # error1 的权重
+    w2 = var1 / total_var  # error2 的权重
 
-    # 拆分旋转/平移权重
-    w1_rot, w2_rot = w1[:, :3], w2[:, :3]
-    w1_trans, w2_trans = w1[:, 3:], w2[:, 3:]
+    # 2. 🆕 关键修复：对齐旋转轴顺序
+    # 输入方差顺序: [rx, ry, rz] -> 索引 0,1,2
+    # 输入旋转顺序: rot_order (默认 rz, rx, ry) -> 需将方差权重重排匹配
+    rot_map = {'rz': 2, 'rx': 0, 'ry': 1}
+    rot_idx = [rot_map[axis] for axis in rot_order]  # 默认 [2, 0, 1]
 
-    # 2. 旋转融合：🆕 直接线性加权（忽略圆周特性）
+    w1_rot = w1[:, rot_idx]  # 重排为 [rz, rx, ry]
+    w2_rot = w2[:, rot_idx]
+
+    w1_trans = w1[:, 3:]  # [tx, ty, tz] 已对齐，无需重排
+    w2_trans = w2[:, 3:]
+
+    # 3. 线性融合
     fused_rot = w1_rot * r1 + w2_rot * r2
-
-    # 3. 平移融合：线性加权
     fused_trans = w1_trans * t1 + w2_trans * t2
 
-    # 若输入为单样本，恢复 1D 形状
+    # 恢复 1D
     if fused_rot.shape[0] == 1:
         return fused_rot.squeeze(), fused_trans.squeeze()
     return fused_rot, fused_trans
+
 
 
 def plot_error_bars(results, model_name,
@@ -348,11 +360,28 @@ def save_pose_arrays_to_csv(csv_path, **pose_dict):
 if __name__ == '__main__':
 
     # === 1. 配置 4 个 CSV 路径 ===
-    csv_files = [
-        '../data/mix_model_output_update/model_output_pa_mix1.csv',
-        '../data/mix_model_output_update/model_output_rlat_mix1.csv',
-        '../data/mix_model_output_update/model_output_pa_mix2.csv',
-        '../data/mix_model_output_update/model_output_rlat_mix2.csv'
+    # csv_files = [
+    #     '../data/all_model_data/8000_pa_mix1_model.csv',
+    #     '../data/all_model_data/8000_rlat_mix1_model.csv',
+    #     '../data/all_model_data/8000_pa_mix2_model.csv',
+    #     '../data/all_model_data/8000_rlat_mix2_model.csv',
+    #     '../data/all_model_data/8000_pa_mix3_model.csv',
+    #     '../data/all_model_data/8000_rlat_mix3_model.csv'
+    # ]
+    # csv_files = [
+    #     '../data/uliver6_mul_data/8000_1/8000_copy1_pa_mix1_model.csv',
+    #     '../data/uliver6_mul_data/8000_1/8000_copy1_rlat_mix1_model.csv',
+    #     '../data/uliver6_mul_data/8000_1/8000_copy1_pa_mix2_model.csv',
+    #     '../data/uliver6_mul_data/8000_1/8000_copy1_rlat_mix2_model.csv',
+    #     '../data/uliver6_mul_data/8000_1/8000_copy1_pa_mix3_model.csv',
+    #     '../data/uliver6_mul_data/8000_1/8000_copy1_rlat_mix3_model.csv'
+    # ]
+    csv_files = ['../data/uliver6_2dof_data/8000_copy1_pa_mix1_model.csv',
+                '../data/uliver6_2dof_data/8000_copy1_rlat_mix1_model.csv',
+                '../data/uliver6_2dof_data/8000_copy1_pa_mix2_model.csv',
+                 '../data/uliver6_2dof_data/8000_copy1_rlat_mix2_model.csv'
+                 # '../data/uliver6_2dof_data/8000_copy1_pa_mix3_model.csv',
+                 # '../data/uliver6_2dof_data/8000_copy1_rlat_mix3_model.csv'
     ]
     R_ctsz2osz_ct1 = np.array([[-1, 0, 0, 0],
                                    [0, 0, 1, 0],
@@ -371,6 +400,53 @@ if __name__ == '__main__':
                                [0, 0, 1, 0],
                                [-1, 0, 0, 500],
                                [0, 0, 0, 1]], dtype=np.float64)
+    # # spine107_img.nii.gz先验方差
+    # var_pa_mix1 = np.array([0.1431, 0.1256, 0.1480, 0.1259, 0.3615, 0.0916], dtype=np.float64) # rx,ry,rz,tx,ty,tz
+    # var_rlat_mix1 = np.array([0.1259, 0.1529, 0.1408, 0.4875, 0.1050, 0.0779], dtype=np.float64) # rx,ry,rz,tx,ty,tz
+    # var_r2p_mix1 = np.array([0.1256, 0.1547, 0.1410, 0.5684, 0.1552, 0.1260], dtype=np.float64) # rx,ry,rz,tx,ty,tz
+    #
+    # var_pa_mix2 = np.array([0.0588, 0.0277, 0.0406, 0.0442, 0.4377, 0.0530], dtype=np.float64) # rx,ry,rz,tx,ty,tz
+    # var_rlat_mix2 = np.array([0.0288, 0.0579, 0.0424, 0.04176, 0.0472, 0.0479], dtype=np.float64)  # rx,ry,rz,tx,ty,tz
+    # var_r2p_mix2 = np.array([0.0286, 0.0585, 0.0426, 0.4493, 0.0616, 0.0668], dtype=np.float64)
+    #
+    # var_pa_mix3 = np.array([0.1185, 0.0522, 0.1232, 0.0696, 0.5706, 0.0908], dtype=np.float64)  # rx,ry,rz,tx,ty,tz
+    # var_rlat_mix3 = np.array([0.550, 0.1206, 0.1210, 0.5540, 0.0805, 0.0812], dtype=np.float64)  # rx,ry,rz,tx,ty,tz
+    # var_r2p_mix3 = np.array([0.0553, 0.1223, 0.1207, 0.6104, 0.1118, 0.1131], dtype=np.float64)
+
+    # uniformed_liver_3.nii.gz先验方差
+    var_pa_mix1 = np.array([0.1533, 0.1132, 0.0952, 0.1311, 0.4423, 0.1775], dtype=np.float64) # rx,ry,rz,tx,ty,tz
+    var_rlat_mix1 = np.array([0.1314, 0.1437, 0.0988, 0.5068, 0.1328, 0.2004], dtype=np.float64) # rx,ry,rz,tx,ty,tz
+    var_r2p_mix1 = np.array([0.1309, 0.1450, 0.0993, 0.5593, 0.1857, 0.2570], dtype=np.float64) # rx,ry,rz,tx,ty,tz
+
+    var_pa_mix2 = np.array([0.0567, 0.0370, 0.0459, 0.0842, 0.4745, 0.1262], dtype=np.float64) # rx,ry,rz,tx,ty,tz
+    var_rlat_mix2 = np.array([0.0443, 0.0577, 0.0545, 0.4961, 0.1028, 0.1340], dtype=np.float64)  # rx,ry,rz,tx,ty,tz
+    var_r2p_mix2 = np.array([0.0437,	0.0582,	0.0551,	0.5303,	0.1311,	0.1608], dtype=np.float64)
+
+    var_pa_mix3 = np.array([0.1197, 0.0702, 0.1016, 0.1364, 2.8470, 0.2270], dtype=np.float64)  # rx,ry,rz,tx,ty,tz
+    var_rlat_mix3 = np.array([0.0793, 0.1227, 0.1049, 3.2533, 0.1386, 0.2485], dtype=np.float64)  # rx,ry,rz,tx,ty,tz
+    var_r2p_mix3 = np.array([0.0782,	0.1237,	0.1061,	3.4051,	0.1769,	0.2905], dtype=np.float64)
+
+    # # # uniformed_liver_6.nii.gz先验方差
+    # var_pa_mix1 = np.array([0.1420, 0.1144, 0.0999, 0.1392, 0.4655, 0.1783], dtype=np.float64)  # rx,ry,rz,tx,ty,tz
+    # var_rlat_mix1 = np.array([0.1340, 0.1628, 0.0963, 1.1248, 0.1386, 0.1885], dtype=np.float64)  # rx,ry,rz,tx,ty,tz
+    # var_r2p_mix1 = np.array([0.1231, 0.1641, 0.0972, 1.2057, 0.1929, 0.2332], dtype=np.float64)  # rx,ry,rz,tx,ty,tz
+    #
+    # var_pa_mix2 = np.array([0.0805, 0.0374, 0.0540, 0.0988, 2.1465, 0.2136], dtype=np.float64)  # rx,ry,rz,tx,ty,tz
+    # var_rlat_mix2 = np.array([0.0418, 0.0861, 0.0641, 1.6101, 0.1118, 0.2306], dtype=np.float64)  # rx,ry,rz,tx,ty,tz
+    # var_r2p_mix2 = np.array([0.0413, 0.0866, 0.0645, 1.6884, 0.1448, 0.2628], dtype=np.float64)
+    # mix3_model
+    # var_pa_mix3 = np.array([0.0739, 0.0407, 0.0567, 0.1169, 2.5242, 0.1750], dtype=np.float64)  # rx,ry,rz,tx,ty,tz
+    # var_rlat_mix3 = np.array([0.0490, 0.0953, 0.0585, 2.5771, 0.1156, 0.1611], dtype=np.float64)  # rx,ry,rz,tx,ty,tz
+    # var_r2p_mix3 = np.array([0.0487, 0.0957, 0.0589, 2.6776, 0.1473, 0.1993], dtype=np.float64)
+    # # mix3_diff_model
+    # var_pa_mix3 = np.array([0.0679, 0.0341, 0.0549, 0.0828, 2.5020, 0.1881], dtype=np.float64)  # rx,ry,rz,tx,ty,tz
+    # var_rlat_mix3 = np.array([0.0415, 0.0916, 0.0525, 2.7259, 0.0919, 0.1977], dtype=np.float64)  # rx,ry,rz,tx,ty,tz
+    # var_r2p_mix3 = np.array([0.0411, 0.0919, 0.0529, 2.7924, 0.1163, 0.2350], dtype=np.float64)
+    # mix3_mul_model
+    var_pa_mix3 = np.array([4.7047, 0.05856, 1.6702, 0.9584, 6.4125, 2.8086], dtype=np.float64)  # rx,ry,rz,tx,ty,tz
+    var_rlat_mix3 = np.array([0.4316, 4.5431, 2.3956, 8.7367, 1.4241, 3.0262], dtype=np.float64)  # rx,ry,rz,tx,ty,tz
+    var_r2p_mix3 = np.array([0.4130, 4.5192, 2.4020, 7.2184, 0.9489, 2.3144], dtype=np.float64)
+
 
     print("🔄 批量计算姿态误差中...")
     data = extract_pose_named_data(csv_files)
@@ -382,6 +458,8 @@ if __name__ == '__main__':
     else:
         print("data 结构:", data)
     # 数据提取
+
+
     pa_mix1_pre_rota = data['pa_mix1_pre_rota']
     pa_mix1_pre_trans = data['pa_mix1_pre_trans']
     pa_mix1_tru_rota = data['pa_mix1_tru_rota']
@@ -392,12 +470,6 @@ if __name__ == '__main__':
     rlat_mix1_tru_rota = data['rlat_mix1_tru_rota']
     rlat_mix1_tru_trans = data['rlat_mix1_tru_trans']
 
-    # # 标签保存
-    # save_pose_arrays_to_csv(
-    #     csv_path='../data/mix_model_output_update/model_label.cvs',
-    #     pa_mix1=(pa_mix1_tru_rota, pa_mix1_tru_trans),
-    #     rlat_mix1=(rlat_mix1_tru_rota, rlat_mix1_tru_trans)
-    # )
 
     pa_mix2_pre_rota = data['pa_mix2_pre_rota']
     pa_mix2_pre_trans = data['pa_mix2_pre_trans']
@@ -408,24 +480,52 @@ if __name__ == '__main__':
     rlat_mix2_pre_trans = data['rlat_mix2_pre_trans']
     rlat_mix2_tru_rota = data['rlat_mix2_tru_rota']
     rlat_mix2_tru_trans = data['rlat_mix2_tru_trans']
+    # # #
+    # pa_mix3_pre_rota = data['pa_mix3_pre_rota']
+    # pa_mix3_pre_trans = data['pa_mix3_pre_trans']
+    # pa_mix3_tru_rota = data['pa_mix3_tru_rota']
+    # pa_mix3_tru_trans = data['pa_mix3_tru_trans']
+    # 
+    # rlat_mix3_pre_rota = data['rlat_mix3_pre_rota']
+    # rlat_mix3_pre_trans = data['rlat_mix3_pre_trans']
+    # rlat_mix3_tru_rota = data['rlat_mix3_tru_rota']
+    # rlat_mix3_tru_trans = data['rlat_mix3_tru_trans']
 
-    # 统一噪声和标签到各视角实际ct坐标系下
+    # # 统一噪声和标签到各视角实际ct坐标系下
     pa_mix2_pre_rota_a, pa_mix2_pre_trans_a = get_base_noise(
                                                 pa_mix2_pre_rota,
                                                 pa_mix2_pre_trans,
                                                 R_ctsz2osz_ct1)
-    # pa_mix2_tru_rota_a, pa_mix2_tru_trans_a = get_base_noise(
-    #                                             pa_mix2_tru_rota,
-    #                                             pa_mix2_tru_trans,
-    #                                             R_ctsz2osz_ct1)
+    pa_mix2_tru_rota_a, pa_mix2_tru_trans_a = get_base_noise(
+                                                pa_mix2_tru_rota,
+                                                pa_mix2_tru_trans,
+                                                R_ctsz2osz_ct1)
     rlat_mix2_pre_rota_a, rlat_mix2_pre_trans_a = get_base_noise(
-                                                    rlat_mix2_pre_rota,
-                                                    rlat_mix2_pre_trans,
-                                                    R_ctsc2osc_ct2)
-    # rlat_mix2_tru_rota_a, rlat_mix2_tru_trans_a = get_base_noise(
-    #                                                 rlat_mix2_tru_rota,
-    #                                                 rlat_mix2_tru_trans,
-    #                                                 R_ctsc2osc_ct2)
+                                                rlat_mix2_pre_rota,
+                                                rlat_mix2_pre_trans,
+                                                R_ctsc2osc_ct2)
+    rlat_mix2_tru_rota_a, rlat_mix2_tru_trans_a = get_base_noise(
+                                                rlat_mix2_tru_rota,
+                                                rlat_mix2_tru_trans,
+                                                R_ctsc2osc_ct2)
+    #
+    # #
+    # pa_mix3_pre_rota_a, pa_mix3_pre_trans_a = get_base_noise(
+    #                                             pa_mix3_pre_rota,
+    #                                             pa_mix3_pre_trans,
+    #                                             R_ctsz2osz_ct1)
+    # pa_mix3_tru_rota_a, pa_mix3_tru_trans_a = get_base_noise(
+    #                                             pa_mix3_tru_rota,
+    #                                             pa_mix3_tru_trans,
+    #                                             R_ctsz2osz_ct1)
+    # rlat_mix3_pre_rota_a, rlat_mix3_pre_trans_a = get_base_noise(
+    #                                             rlat_mix3_pre_rota,
+    #                                             rlat_mix3_pre_trans,
+    #                                             R_ctsc2osc_ct2)
+    # rlat_mix3_tru_rota_a, rlat_mix3_tru_trans_a = get_base_noise(
+    #                                             rlat_mix3_tru_rota,
+    #                                             rlat_mix3_tru_trans,
+    #                                             R_ctsc2osc_ct2)
 
     # 获取加入噪声后正位光源与侧位光源之间的变换关系
     R_sz_osc2osz = get_source_transform(
@@ -443,12 +543,12 @@ if __name__ == '__main__':
                                                         R_sz_osc2osz,
                                                         R_ctsz2osz,
                                                         R_ctsc2osc)
-    # rlat_mix1_tru_rota_sz, rlat_mix1_tru_trans_sz = get_osz_noise(
-    #                                                     rlat_mix1_tru_rota,
-    #                                                     rlat_mix1_tru_trans,
-    #                                                     R_sz_osc2osz,
-    #                                                     R_ctsz2osz,
-    #                                                     R_ctsc2osc)
+    rlat_mix1_tru_rota_sz, rlat_mix1_tru_trans_sz = get_osz_noise(
+                                                        rlat_mix1_tru_rota,
+                                                        rlat_mix1_tru_trans,
+                                                        R_sz_osc2osz,
+                                                        R_ctsz2osz,
+                                                        R_ctsc2osc)
 
     rlat_mix2_pre_rota_sz, rlat_mix2_pre_trans_sz = get_osz_noise(
                                                         rlat_mix2_pre_rota_a,
@@ -456,18 +556,35 @@ if __name__ == '__main__':
                                                         R_sz_osc2osz,
                                                         R_ctsz2osz,
                                                         R_ctsc2osc)
-    # rlat_mix2_tru_rota_sz, rlat_mix2_tru_trans_sz = get_osz_noise(
-    #                                                     rlat_mix2_tru_rota_a,
-    #                                                     rlat_mix2_tru_trans_a,
+    rlat_mix2_tru_rota_sz, rlat_mix2_tru_trans_sz = get_osz_noise(
+                                                        rlat_mix2_tru_rota_a,
+                                                        rlat_mix2_tru_trans_a,
+                                                        R_sz_osc2osz,
+                                                        R_ctsz2osz,
+                                                        R_ctsc2osc)
+    # #
+    # rlat_mix3_pre_rota_sz, rlat_mix3_pre_trans_sz = get_osz_noise(
+    #                                                     rlat_mix3_pre_rota_a,
+    #                                                     rlat_mix3_pre_trans_a,
+    #                                                     R_sz_osc2osz,
+    #                                                     R_ctsz2osz,
+    #                                                     R_ctsc2osc)
+    # rlat_mix3_tru_rota_sz, rlat_mix3_tru_trans_sz = get_osz_noise(
+    #                                                     rlat_mix3_tru_rota_a,
+    #                                                     rlat_mix3_tru_trans_a,
     #                                                     R_sz_osc2osz,
     #                                                     R_ctsz2osz,
     #                                                     R_ctsc2osc)
 
+
+
+
     # # 计算mix1模型姿态误差
     error_pa_mix1 = compute_pose_errors_unknown_mean(pre_rota=pa_mix1_pre_rota,
-                                               tru_rota=pa_mix1_tru_rota,
-                                               pre_trans=pa_mix1_pre_trans,
-                                               tru_trans=pa_mix1_tru_trans)
+                                                   tru_rota=pa_mix1_tru_rota,
+                                                   pre_trans=pa_mix1_pre_trans,
+                                                   tru_trans=pa_mix1_tru_trans)
+
     error_rlat_mix1 = compute_pose_errors_unknown_mean(pre_rota=rlat_mix1_pre_rota,
                                                tru_rota=rlat_mix1_tru_rota,
                                                pre_trans=rlat_mix1_pre_trans,
@@ -476,24 +593,24 @@ if __name__ == '__main__':
                                                  tru_rota=pa_mix1_tru_rota,
                                                  pre_trans=rlat_mix1_pre_trans_sz,
                                                  tru_trans=pa_mix1_tru_trans)
-    # # 计算mix1融合后的姿态误差
-    fusion_pre_rota_mix1, fusion_pre_trans_mix1 = reg_data_fusion(error1=error_pa_mix1,
-                                                        error2=error_rlat2pa_mix1,
-                                                        pre_rota1=pa_mix1_pre_rota,
-                                                        pre_trans1=pa_mix1_pre_trans,
-                                                        pre_rota2=rlat_mix1_pre_rota_sz,
-                                                        pre_trans2=rlat_mix1_pre_trans_sz)
+    # # # # # # # 计算mix1融合后的姿态误差
+    # fusion_pre_rota_mix1, fusion_pre_trans_mix1 = reg_data_fusion(error1=var_pa_mix1,
+    #                                                     error2=var_r2p_mix1,
+    #                                                     pre_rota1=pa_mix1_pre_rota,
+    #                                                     pre_trans1=pa_mix1_pre_trans,
+    #                                                     pre_rota2=rlat_mix1_pre_rota_sz,
+    #                                                     pre_trans2=rlat_mix1_pre_trans_sz)
+    # 
+    # error_fusion_mix1 = compute_pose_errors_unknown_mean(pre_rota=fusion_pre_rota_mix1,
+    #                                                      tru_rota=pa_mix1_tru_rota,
+    #                                                      pre_trans=fusion_pre_trans_mix1,
+    #                                                      tru_trans=pa_mix1_tru_trans)
 
-    error_fusion_mix1 = compute_pose_errors_unknown_mean(pre_rota=fusion_pre_rota_mix1,
-                                                         tru_rota=pa_mix1_tru_rota,
-                                                         pre_trans=fusion_pre_trans_mix1,
-                                                         tru_trans=pa_mix1_tru_trans)
-
-    # # 计算mix2模型姿态误差
+    # # # # 计算mix2模型姿态误差
     error_pa_mix2 = compute_pose_errors_unknown_mean(pre_rota=pa_mix2_pre_rota_a,
-                                               tru_rota=pa_mix1_tru_rota,
-                                               pre_trans=pa_mix2_pre_trans_a,
-                                               tru_trans=pa_mix1_tru_trans)
+                                                     tru_rota=pa_mix1_tru_rota,
+                                                     pre_trans=pa_mix2_pre_trans_a,
+                                                     tru_trans=pa_mix1_tru_trans)
     error_rlat_mix2 = compute_pose_errors_unknown_mean(pre_rota=rlat_mix2_pre_rota_a,
                                                  tru_rota=rlat_mix1_tru_rota,
                                                  pre_trans=rlat_mix2_pre_trans_a,
@@ -502,31 +619,68 @@ if __name__ == '__main__':
                                                     tru_rota=pa_mix1_tru_rota,
                                                     pre_trans=rlat_mix2_pre_trans_sz,
                                                     tru_trans=pa_mix1_tru_trans)
-    # # 计算mix2融合后的姿态误差
-    fusion_pre_rota_mix2, fusion_pre_trans_mix2 = reg_data_fusion(error1=error_pa_mix2,
-                                                        error2=error_rlat2pa_mix2,
-                                                        pre_rota1=pa_mix2_pre_rota_a,
-                                                        pre_trans1=pa_mix2_pre_trans_a,
-                                                        pre_rota2=rlat_mix2_pre_rota_sz,
-                                                        pre_trans2=rlat_mix2_pre_trans_sz)
+    # # # # # # # # 计算mix2融合后的姿态误差
+    # fusion_pre_rota_mix2, fusion_pre_trans_mix2 = reg_data_fusion(error1=var_pa_mix2,
+    #                                                     error2=var_r2p_mix2,
+    #                                                     pre_rota1=pa_mix2_pre_rota_a,
+    #                                                     pre_trans1=pa_mix2_pre_trans_a,
+    #                                                     pre_rota2=rlat_mix2_pre_rota_sz,
+    #                                                     pre_trans2=rlat_mix2_pre_trans_sz)
+    # 
+    # error_fusion_mix2 = compute_pose_errors_unknown_mean(pre_rota=fusion_pre_rota_mix2,
+    #                                                      tru_rota=pa_mix1_tru_rota,
+    #                                                      pre_trans=fusion_pre_trans_mix2,
+    #                                                      tru_trans=pa_mix1_tru_trans)
+    #
+    # # # # # # # 计算mix3模型姿态误差
+    # error_pa_mix3 = compute_pose_errors_unknown_mean(pre_rota=pa_mix3_pre_rota_a,
+    #                                                  tru_rota=pa_mix1_tru_rota,
+    #                                                  pre_trans=pa_mix3_pre_trans_a,
+    #                                                  tru_trans=pa_mix1_tru_trans)
+    # error_rlat_mix3 = compute_pose_errors_unknown_mean(pre_rota=rlat_mix3_pre_rota_a,
+    #                                              tru_rota=rlat_mix1_tru_rota,
+    #                                              pre_trans=rlat_mix3_pre_trans_a,
+    #                                              tru_trans=rlat_mix1_tru_trans)
+    # error_rlat2pa_mix3 = compute_pose_errors_unknown_mean(pre_rota=rlat_mix3_pre_rota_sz,
+    #                                                 tru_rota=pa_mix1_tru_rota,
+    #                                                 pre_trans=rlat_mix3_pre_trans_sz,
+    #                                                 tru_trans=pa_mix1_tru_trans)
+    # # # # # # # # 计算mix3融合后的姿态误差
+    # fusion_pre_rota_mix3, fusion_pre_trans_mix3 = reg_data_fusion(error1=var_pa_mix3,
+    #                                                     error2=var_r2p_mix3,
+    #                                                     pre_rota1=pa_mix3_pre_rota_a,
+    #                                                     pre_trans1=pa_mix3_pre_trans_a,
+    #                                                     pre_rota2=rlat_mix3_pre_rota_sz,
+    #                                                     pre_trans2=rlat_mix3_pre_trans_sz)
+    # 
+    # error_fusion_mix3 = compute_pose_errors_unknown_mean(pre_rota=fusion_pre_rota_mix3,
+    #                                                      tru_rota=pa_mix1_tru_rota,
+    #                                                      pre_trans=fusion_pre_trans_mix3,
+    #                                                      tru_trans=pa_mix1_tru_trans)
+    # #
+    # # # # 绘图
+    # # # ✅ 方式1：直接循环调用（推荐）
+    output_dir = "../data/data_img/uliver6_2dof_img/8000_1"
+    os.makedirs(output_dir, exist_ok=True)
 
-    error_fusion_mix2 = compute_pose_errors_unknown_mean(pre_rota=fusion_pre_rota_mix2,
-                                                         tru_rota=pa_mix1_tru_rota,
-                                                         pre_trans=fusion_pre_trans_mix2,
-                                                         tru_trans=pa_mix1_tru_trans)
-    # 绘图
-    # ✅ 方式1：直接循环调用（推荐）
     for name, err in [
         ('pa_mix1', error_pa_mix1),
         ('rlat_mix1', error_rlat_mix1),
         ('rlat2pa_mix1', error_rlat2pa_mix1),
-        ('fusion_mix1', error_fusion_mix1),
+        # ('fusion_mix1', error_fusion_mix1),
         ('pa_mix2', error_pa_mix2),
         ('rlat_mix2', error_rlat_mix2),
         ('rlat2pa_mix2', error_rlat2pa_mix2),
-        ('fusion_mix2', error_fusion_mix2)
+        # ('fusion_mix2', error_fusion_mix2),
+        # ('pa_mix3', error_pa_mix3),
+        # ('rlat_mix3', error_rlat_mix3),
+        # ('rlat2pa_mix3', error_rlat2pa_mix3),
+        # ('fusion_mix3', error_fusion_mix3)
     ]:
-        plot_error_bars(err, name, block=False)  # 🆕 非阻塞模式
+        save_path = os.path.join(output_dir, f"{name}.png")
+
+        # plot_error_bars(err, name, block=False)
+        plot_error_bars(err, name, block=False, save_path=save_path)  # 🆕 非阻塞模式
 
     # 🆕 关键：最后添加一个阻塞式 show() 保持所有窗口显示
     # （否则主程序退出后窗口会被关闭）
@@ -534,4 +688,3 @@ if __name__ == '__main__':
 
 
     print("✅ 批量计算姿态误差完成！")
-

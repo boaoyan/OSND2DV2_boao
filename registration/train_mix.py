@@ -80,7 +80,7 @@ batch_size = global_config['batch_size']
 rota_noise_range = torch.tensor(global_config['noise_params']['rota_noise_range'])
 trans_noise_range = torch.tensor(global_config['noise_params']['trans_noise_range'])
 label_transformer_mix = LabelTransformMix(global_config['noise_params'])
-volume_dir_2 = r"../data/spine107_img.nii.gz"
+volume_dir_2 = r"../data/voxel_data/spine107_img.nii.gz"
 
 subject_pa = read(volume_dir_2, bone_attenuation_multiplier=1.0, orientation='PA', sid=500)
 subject_rlat = read(volume_dir_2, bone_attenuation_multiplier=1.0, orientation='RLAT', sid=500)

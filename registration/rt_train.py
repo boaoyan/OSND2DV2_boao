@@ -170,7 +170,7 @@ def run_single_pose(standard_pose: str, volume_path: str, config: dict):
 
 
 global_config = init_config()
-volume_path = r"../data/spine107_img.nii.gz"
+volume_path = r"../data/voxel_data/spine107_img.nii.gz"
 euler_dev_list = []
 euler_dev_tran_list = []
 # 分别运行 PA 和 RLAT

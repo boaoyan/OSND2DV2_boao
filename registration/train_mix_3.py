@@ -150,7 +150,7 @@ delx = global_config['delx']
 batch_size = global_config['batch_size']
 
 label_transformer_mix = LabelTransformMix2(global_config['norm_params'])
-volume_dir_2 = r"../data/spine107_img.nii.gz"
+volume_dir_2 = r"../data/voxel_data/spine107_img.nii.gz"
 
 subject_pa = read(volume_dir_2, bone_attenuation_multiplier=1.0, orientation='PA', sid=500)
 subject_rlat = read(volume_dir_2, bone_attenuation_multiplier=1.0, orientation='RLAT', sid=500)

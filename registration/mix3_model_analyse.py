@@ -12,8 +12,6 @@ from math_process.get_noise_label import get_transformer_noise
 from projector.drr import DRR
 from projector.read_data import read
 
-from registration.label_transform_mix import LabelTransformMix
-
 
 def init_config():
     return {
@@ -57,6 +55,7 @@ def init_config():
             'rota_noise_norm': [10, 10, 10]
         }
     }
+
 
 def norm_img(img):
     # img: [B, 1, H, W]
@@ -159,7 +158,7 @@ def save_single_model_results(results_list: List[Dict],
     return csv_path, npy_path
 
 
-def save_results_wrapper(results_list: List[Dict], prefix: str, save_dir: str, n_iterations) -> dict:
+def save_results_wrapper(results_list: List[Dict], prefix: str, save_dir: str) -> dict:
     """
     修正：根据实际模型名称动态返回键名
     """
@@ -167,9 +166,8 @@ def save_results_wrapper(results_list: List[Dict], prefix: str, save_dir: str, n
         return {}
 
     model_name = results_list[0].get('model_name', 'unknown_model')
-    new_prefix = f"{prefix}_iter{n_iterations:04d}"
     csv_path, npy_path = save_single_model_results(
-        results_list, model_name=model_name, prefix=new_prefix, save_dir=save_dir
+        results_list, model_name=model_name, prefix=prefix, save_dir=save_dir
     )
 
     # 动态生成键名，例如 mix1_csv, mix2_csv
@@ -184,7 +182,8 @@ if __name__ == "__main__":
     # 1. 初始化配置
     global_config = init_config()
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    volume_dir_2 = r"../data/voxel_data/spine107_img.nii.gz"
+    volume_dir_2 = r"data/spine107_img.nii.gz"
+    model_label = r"data/model_label.cvs"
     height = global_config['height']
     delx = global_config['delx']
     batch_size = global_config['batch_size']
@@ -234,7 +233,8 @@ if __name__ == "__main__":
     # RLAT 标准图 (零变换)
     rot_rlat_clean = torch.zeros(1, 3, device=device)
     trans_rlat_clean = torch.zeros(1, 3, device=device)
-    img_rlat_clean = drr_rlat(rot_rlat_clean, trans_rlat_clean, parameterization="euler_angles", convention="ZXY", degrees=True)
+    img_rlat_clean = drr_rlat(rot_rlat_clean, trans_rlat_clean, parameterization="euler_angles", convention="ZXY",
+                              degrees=True)
     img_rlat_clean = norm_img(img_rlat_clean)  # [1, H, W] 或 [1, 1, H, W]
 
     # 确保通道维度 [1, 1, H, W]
@@ -243,43 +243,56 @@ if __name__ == "__main__":
     if img_rlat_clean.dim() == 3:
         img_rlat_clean = img_rlat_clean.unsqueeze(1)
 
-    # # 扩展到 batch_size 维度，方便后续拼接 [B, 1, H, W]
-    # img_pa_clean_batch = img_pa_clean.expand(batch_size, -1, -1, -1).contiguous()
-    # img_rlat_clean_batch = img_rlat_clean.expand(batch_size, -1, -1, -1).contiguous()
-
-
-    # 3. 【关键修正】预加载模型 (只在循环外加载一次)
+    # 扩展到 batch_size 维度，方便后续拼接 [B, 1, H, W]
+    img_pa_clean_batch = img_pa_clean.expand(batch_size, -1, -1, -1).contiguous()
+    img_rlat_clean_batch = img_rlat_clean.expand(batch_size, -1, -1, -1).contiguous()
+    # 3. 预加载模型
     print("⏳ 正在加载模型...")
-    mix1_model = GridModel(model_config=global_config['model_config'], num_classes=6).to(device)
-    mix1_model.load_state_dict(torch.load(global_config['mix1_model_path'], map_location=device))
-    mix1_model.eval()
-
-    mix2_model = GridModel(model_config=global_config['model_config'], num_classes=6).to(device)
-    mix2_model.load_state_dict(torch.load(global_config['mix2_model_path'], map_location=device))
-    mix2_model.eval()
-    
     mix3_model = GridModel(model_config=global_config['model_config'], num_classes=6, in_channel=2).to(device)
     mix3_model.load_state_dict(torch.load(global_config['mix3_model_path'], map_location=device))
     mix3_model.eval()
     print("✅ 模型加载完成")
 
     # 4. 准备标签转换器
-    label_transformer_mix1 = LabelTransformMix(global_config['noise_params'])
-    label_transformer_mix = LabelTransformMix2(global_config['norm_params'])
+    label_transformer_mix2 = LabelTransformMix2(global_config['norm_params'])
 
     # 5. 准备保存目录
-    save_dir = "data/output_results_mix"
+    save_dir = "data/output_results_mix3"
     os.makedirs(save_dir, exist_ok=True)
 
     # 6. 结果收集列表
-    mix1_results_pa, mix1_results_rlat = [], []
-    mix2_results_pa, mix2_results_rlat = [], []
     mix3_results_pa, mix3_results_rlat = [], []
 
-    n_iterations = 1
+    n_iterations = 1000
+
+    # ==========================================
+    # 🆕 新增：预加载 CSV 噪声/位姿数据
+    # ==========================================
+    print(f"📥 正在加载标签文件: {model_label}")
+    label_df = pd.read_csv(model_label)
+
+    # 严格匹配你提供的 CSV 列名
+    pa_rota_cols = ['pa_mix1_rota_z', 'pa_mix1_rota_x', 'pa_mix1_rota_y']
+    pa_trans_cols = ['pa_mix1_trans_x', 'pa_mix1_trans_y', 'pa_mix1_trans_z']
+    rlat_rota_cols = ['rlat_mix1_rota_z', 'rlat_mix1_rota_x', 'rlat_mix1_rota_y']
+    rlat_trans_cols = ['rlat_mix1_trans_x', 'rlat_mix1_trans_y', 'rlat_mix1_trans_z']
+
+    # 转为 (N, 3) Tensor 并预加载至 GPU
+    rot_noise_pa_all = torch.tensor(label_df[pa_rota_cols].values, dtype=torch.float32, device=device)
+    trans_noise_pa_all = torch.tensor(label_df[pa_trans_cols].values, dtype=torch.float32, device=device)
+    rot_noise_rlat_all = torch.tensor(label_df[rlat_rota_cols].values, dtype=torch.float32, device=device)
+    trans_noise_rlat_all = torch.tensor(label_df[rlat_trans_cols].values, dtype=torch.float32, device=device)
+
+    assert len(rot_noise_pa_all) >= n_iterations, f"⚠️ CSV数据量({len(rot_noise_pa_all)}) < 迭代次数({n_iterations})"
+    print(f"✅ 噪声数据预加载完成 | PA: {rot_noise_pa_all.shape} | RLAT: {rot_noise_rlat_all.shape}")
+
     print(f"🚀 开始推理，共 {n_iterations} 次迭代...")
     for i in range(n_iterations):
+        # 📌 切片获取当前批次数据 (兼容 batch_size=1 或 >1)
+        idx = slice(i, i + batch_size)
+
         # --- PA 视角部分 ---
+        # 直接使用 CSV 中的值作为 rotations/translations
         rot_noise_pa = torch.empty(batch_size, 3, device=device).uniform_(-1.0, 1.0)
         trans_noise_pa = torch.empty(batch_size, 3, device=device).uniform_(-1.0, 1.0)
 
@@ -295,11 +308,10 @@ if __name__ == "__main__":
             parameterization="euler_angles", convention="ZXY", degrees=True
         )
         img_pa = norm_img(img_pa)
-        label_pa_mix1 = torch.cat([rot_noise_pa, trans_noise_pa], dim=1)
-        label_pa_mix2 = torch.cat([label_rot_pa, label_trans_pa], dim=1)
-        label_pa_mix3 = torch.cat([label_rot_pa, label_trans_pa], dim=1)# [8, 6]
+        label_pa_mix3 = torch.cat([label_rot_pa, label_trans_pa], dim=1)  # [8, 6]
 
         # --- RLAT 视角部分 ---
+
         rot_noise_rlat = torch.empty(batch_size, 3, device=device).uniform_(-1.0, 1.0)
         trans_noise_rlat = torch.empty(batch_size, 3, device=device).uniform_(-1.0, 1.0)
 
@@ -315,128 +327,66 @@ if __name__ == "__main__":
             parameterization="euler_angles", convention="ZXY", degrees=True
         )
         img_rlat = norm_img(img_rlat)
-        label_rlat_mix1 = torch.cat([rot_noise_rlat, trans_noise_rlat], dim=1)
-        label_rlat_mix2 = torch.cat([label_rot_rlat, label_trans_rlat], dim=1)
-        label_rlat_mix3 = torch.cat([label_rot_rlat, label_trans_rlat], dim=1)# [8, 6]
+        label_rlat_mix3 = torch.cat([label_rot_rlat, label_trans_rlat], dim=1)  # [8, 6]
 
         # 🆕 === 核心修改：构建 2 通道输入 ===
-        img_pa_diff = img_pa- img_pa_clean
-        img_rlat_diff = img_rlat - img_rlat_clean
-        img_pa_2ch = torch.cat([img_pa, img_pa_diff], dim=1)
-        img_rlat_2ch = torch.cat([img_rlat, img_rlat_diff], dim=1)
-        
-        # # 1. 动态获取当前批次大小（处理最后一次迭代不足 batch_size 的情况）
-        # cur_bs = rotations_pa.shape[0]
-        #
-        # # 2. 确保图像为 4D [B, 1, H, W]
-        # if img_pa.dim() == 3: img_pa = img_pa.unsqueeze(1)
-        # if img_rlat.dim() == 3: img_rlat = img_rlat.unsqueeze(1)
-        #
-        # # 3. 截取对应长度的标准图
-        # pa_clean_cur = img_pa_clean_batch[:cur_bs]
-        # rlat_clean_cur = img_rlat_clean_batch[:cur_bs]
-        #
-        # # 4. 通道拼接 [B, 2, H, W] ⚠️ 顺序需与训练时一致，此处默认为 [噪声图, 标准图]
-        # img_pa_2ch = torch.cat([img_pa, pa_clean_cur], dim=1)
-        # img_rlat_2ch = torch.cat([img_rlat, rlat_clean_cur], dim=1)
+        # 1. 动态获取当前批次大小（处理最后一次迭代不足 batch_size 的情况）
+        cur_bs = rotations_pa.shape[0]
 
-        # --- 推理 ---
+        # 2. 确保图像为 4D [B, 1, H, W]
+        if img_pa.dim() == 3: img_pa = img_pa.unsqueeze(1)
+        if img_rlat.dim() == 3: img_rlat = img_rlat.unsqueeze(1)
+
+        # 3. 截取对应长度的标准图
+        pa_clean_cur = img_pa_clean_batch[:cur_bs]
+        rlat_clean_cur = img_rlat_clean_batch[:cur_bs]
+
+        # 4. 通道拼接 [B, 2, H, W] ⚠️ 顺序需与训练时一致，此处默认为 [噪声图, 标准图]
+        img_pa_2ch = torch.cat([img_pa, pa_clean_cur], dim=1)
+        img_rlat_2ch = torch.cat([img_rlat, rlat_clean_cur], dim=1)
+
+        # ================= 推理 =================
         with torch.no_grad():
-            # Mix1
-            outputs_pa_mix1 = mix1_model(img_pa)
-            pre_rota_pa_mix1, pre_trans_pa_mix1 = label_transformer_mix1.label2real(outputs_pa_mix1)
-            tru_rota_pa_mix1, tru_trans_pa_mix1 = label_transformer_mix1.label2real(label_pa_mix1)
-
-            outputs_rlat_mix1 = mix1_model(img_rlat)
-            pre_rota_rlat_mix1, pre_trans_rlat_mix1 = label_transformer_mix1.label2real(outputs_rlat_mix1)
-            tru_rota_rlat_mix1, tru_trans_rlat_mix1 = label_transformer_mix1.label2real(label_rlat_mix1)
-
-            # Mix2
-            outputs_pa_mix2 = mix2_model(img_pa)
-            pre_rota_pa_mix2, pre_trans_pa_mix2 = label_transformer_mix.label2real(outputs_pa_mix2)
-            tru_rota_pa_mix2, tru_trans_pa_mix2 = label_transformer_mix.label2real(label_pa_mix2)
-
-            outputs_rlat_mix2 = mix2_model(img_rlat)
-            pre_rota_rlat_mix2, pre_trans_rlat_mix2 = label_transformer_mix.label2real(outputs_rlat_mix2)
-            tru_rota_rlat_mix2, tru_trans_rlat_mix2 = label_transformer_mix.label2real(label_rlat_mix2)
-
-            # Mix3
+            # PA 分支
             outputs_pa_mix3 = mix3_model(img_pa_2ch)  # ✅ 传入 2 通道
-            pre_rota_pa_mix3, pre_trans_pa_mix3 = label_transformer_mix.label2real(outputs_pa_mix3)
-            tru_rota_pa_mix3, tru_trans_pa_mix3 = label_transformer_mix.label2real(label_pa_mix3)
+            pre_rota_pa_mix3, pre_trans_pa_mix3 = label_transformer_mix2.label2real(outputs_pa_mix3)
+            tru_rota_pa_mix3, tru_trans_pa_mix3 = label_transformer_mix2.label2real(label_pa_mix3)
 
+            # RLAT 分支
             outputs_rlat_mix3 = mix3_model(img_rlat_2ch)  # ✅ 传入 2 通道
-            pre_rota_rlat_mix3, pre_trans_rlat_mix3 = label_transformer_mix.label2real(outputs_rlat_mix3)
-            tru_rota_rlat_mix3, tru_trans_rlat_mix3 = label_transformer_mix.label2real(label_rlat_mix3)
-
+            pre_rota_rlat_mix3, pre_trans_rlat_mix3 = label_transformer_mix2.label2real(outputs_rlat_mix3)
+            tru_rota_rlat_mix3, tru_trans_rlat_mix3 = label_transformer_mix2.label2real(label_rlat_mix3)
 
         # --- 构建结果字典 ---
-        mix1_pa_result = {
-            'pose_type': 'PA', 'batch_size': batch_size, 'model_name': 'mix1_model',
-            'pre_rota': pre_rota_pa_mix1.cpu().detach().numpy().tolist(),
-            'pre_trans': pre_trans_pa_mix1.cpu().detach().numpy().tolist(),
-            'tru_rota': tru_rota_pa_mix1.cpu().detach().numpy().tolist(),
-            'tru_trans': tru_trans_pa_mix1.cpu().detach().numpy().tolist()
-        }
-        mix1_rlat_result = {
-            'pose_type': 'RLAT', 'batch_size': batch_size, 'model_name': 'mix1_model',
-            'pre_rota': pre_rota_rlat_mix1.cpu().detach().numpy().tolist(),
-            'pre_trans': pre_trans_rlat_mix1.cpu().detach().numpy().tolist(),
-            'tru_rota': tru_rota_rlat_mix1.cpu().detach().numpy().tolist(),
-            'tru_trans': tru_trans_rlat_mix1.cpu().detach().numpy().tolist()
-        }
-        mix2_pa_result = {
-            'pose_type': 'PA', 'batch_size': batch_size, 'model_name': 'mix2_model',
-            'pre_rota': pre_rota_pa_mix2.cpu().detach().numpy().tolist(),
-            'pre_trans': pre_trans_pa_mix2.cpu().detach().numpy().tolist(),
-            'tru_rota': tru_rota_pa_mix2.cpu().detach().numpy().tolist(),
-            'tru_trans': tru_trans_pa_mix2.cpu().detach().numpy().tolist()
-        }
-        mix2_rlat_result = {
-            'pose_type': 'RLAT', 'batch_size': batch_size, 'model_name': 'mix2_model',
-            'pre_rota': pre_rota_rlat_mix2.cpu().detach().numpy().tolist(),
-            'pre_trans': pre_trans_rlat_mix2.cpu().detach().numpy().tolist(),
-            'tru_rota': tru_rota_rlat_mix2.cpu().detach().numpy().tolist(),
-            'tru_trans': tru_trans_rlat_mix2.cpu().detach().numpy().tolist()
-        }
         mix3_pa_result = {
-            'pose_type': 'PA', 'batch_size': batch_size, 'model_name': 'mix3_model',
+            'pose_type': 'PA', 'batch_size': batch_size, 'model_name': 'mix2_model',
             'pre_rota': pre_rota_pa_mix3.cpu().detach().numpy().tolist(),
             'pre_trans': pre_trans_pa_mix3.cpu().detach().numpy().tolist(),
             'tru_rota': tru_rota_pa_mix3.cpu().detach().numpy().tolist(),
             'tru_trans': tru_trans_pa_mix3.cpu().detach().numpy().tolist()
         }
         mix3_rlat_result = {
-            'pose_type': 'RLAT', 'batch_size': batch_size, 'model_name': 'mix3_model',
+            'pose_type': 'RLAT', 'batch_size': batch_size, 'model_name': 'mix2_model',
             'pre_rota': pre_rota_rlat_mix3.cpu().detach().numpy().tolist(),
             'pre_trans': pre_trans_rlat_mix3.cpu().detach().numpy().tolist(),
             'tru_rota': tru_rota_rlat_mix3.cpu().detach().numpy().tolist(),
             'tru_trans': tru_trans_rlat_mix3.cpu().detach().numpy().tolist()
         }
 
-        mix1_results_pa.append(mix1_pa_result)
-        mix1_results_rlat.append(mix1_rlat_result)
-        mix2_results_pa.append(mix2_pa_result)
-        mix2_results_rlat.append(mix2_rlat_result)
         mix3_results_pa.append(mix3_pa_result)
         mix3_results_rlat.append(mix3_rlat_result)
 
         if (i + 1) % 50 == 0:
             print(f"✅ 进度：{i + 1}/{n_iterations}")
 
-
     print(f"\n🎉 推理完成！开始保存...")
 
     # 7. 【关键修正】保存并使用正确的变量名
     # PA
-    mix1_pa_files = save_results_wrapper(mix1_results_pa, "model_output_pa", save_dir, n_iterations)
-    mix2_pa_files = save_results_wrapper(mix2_results_pa, "model_output_pa", save_dir, n_iterations)
-    mix3_pa_files = save_results_wrapper(mix3_results_pa, "model_output_pa", save_dir, n_iterations)
+    mix3_pa_files = save_results_wrapper(mix3_results_pa, "model_output_pa", save_dir)
 
     # RLAT
-    mix1_rlat_files = save_results_wrapper(mix1_results_rlat, "model_output_rlat", save_dir, n_iterations)
-    mix2_rlat_files = save_results_wrapper(mix2_results_rlat, "model_output_rlat", save_dir, n_iterations)
-    mix3_rlat_files = save_results_wrapper(mix3_results_rlat, "model_output_rlat", save_dir, n_iterations)
+    mix3_rlat_files = save_results_wrapper(mix3_results_rlat, "model_output_rlat", save_dir)
 
     # 8. 打印信息 (使用正确的变量，并补充 Mix1 的信息)
     print(f"\n{'=' * 60}")
@@ -445,34 +395,19 @@ if __name__ == "__main__":
 
     # === PA 姿态输出文件 ===
     print(f"\n📁 PA 姿态输出文件:")
-    if mix1_pa_files:
-        print(f"  Mix1 CSV:  {mix1_pa_files.get('mix1_csv', 'N/A')}")
-        print(f"  Mix1 NPY:  {mix1_pa_files.get('mix1_npy', 'N/A')}")
-    if mix2_pa_files:
-        print(f"  Mix2 CSV:  {mix2_pa_files.get('mix2_csv', 'N/A')}")
-        print(f"  Mix2 NPY:  {mix2_pa_files.get('mix2_npy', 'N/A')}")
     if mix3_pa_files:
-        print(f"  Mix3 CSV:  {mix3_pa_files.get('mix2_csv', 'N/A')}")
-        print(f"  Mix3 NPY:  {mix3_pa_files.get('mix2_npy', 'N/A')}")
+        print(f"  Mix3 CSV:  {mix3_pa_files.get('mix1_csv', 'N/A')}")
+        print(f"  Mix3 NPY:  {mix3_pa_files.get('mix1_npy', 'N/A')}")
 
     # === RLAT 姿态输出文件 ===
     print(f"\n📁 RLAT 姿态输出文件:")
-    if mix1_rlat_files:
-        print(f"  Mix1 CSV:  {mix1_rlat_files.get('mix1_csv', 'N/A')}")
-        print(f"  Mix1 NPY:  {mix1_rlat_files.get('mix1_npy', 'N/A')}")
-    if mix2_rlat_files:
-        print(f"  Mix2 CSV:  {mix2_rlat_files.get('mix2_csv', 'N/A')}")
-        print(f"  Mix2 NPY:  {mix2_rlat_files.get('mix2_npy', 'N/A')}")
     if mix3_rlat_files:
-        print(f"  Mix3 CSV:  {mix3_rlat_files.get('mix3_csv', 'N/A')}")
-        print(f"  Mix3 NPY:  {mix3_rlat_files.get('mix3_npy', 'N/A')}")
+        print(f"  Mix3 CSV:  {mix3_rlat_files.get('mix1_csv', 'N/A')}")
+        print(f"  Mix3 NPY:  {mix3_rlat_files.get('mix1_npy', 'N/A')}")
 
     print(f"\n📂 保存目录：{os.path.abspath(save_dir)}")
     print(f"{'=' * 60}\n")
 
     # 清理显存
-    del mix1_model, mix2_model, mix3_model
+    del mix3_model
     torch.cuda.empty_cache()
-
-
-

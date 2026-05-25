@@ -226,7 +226,7 @@ if __name__ == '__main__':
     # Read in the volume and get its origin and spacing in world coordinates
     # subject = load_example_ct(orientation="AP")
     # volume_dir = "data/CT25/lum_25.nii.gz"
-    volume_dir_2 = r"../data/spine107_img.nii.gz"
+    volume_dir_2 = r"../data/voxel_data/spine107_img.nii.gz"
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     # 生成与光源坐标系一致的噪声
     # rotations = np.array([5, 5, 5], dtype=np.float64)

@@ -11,8 +11,8 @@ from grid_efficientnet.grid_efficientb0_model import GridModel
 from projector.drr import DRR
 from projector.read_data import read
 from projector.pose import convert
-from registration.label_transform_mix_2 import LabelTransformMix2
-from registration.math_process.get_noise_label import get_transformer_noise, get_transformer_noise_vector
+from label_transform_mix_2 import LabelTransformMix2
+from math_process.get_noise_label import get_transformer_noise, get_transformer_noise_vector
 
 
 def norm_img(img):
@@ -51,7 +51,7 @@ def norm_label(rot_noise, trans_noise):
     return rot_norm, trans_norm
 def init_config():
     return {
-        "batch_size": 4,
+        "batch_size": 16,
         "lr": 5e-4,
         "device": "cuda" if torch.cuda.is_available() else "cpu",
         "delx": 0.469,
@@ -150,29 +150,66 @@ delx = global_config['delx']
 batch_size = global_config['batch_size']
 
 label_transformer_mix = LabelTransformMix2(global_config['norm_params'])
-volume_dir_2 = r"../data/voxel_data/spine107_img.nii.gz"
 
-subject_pa = read(volume_dir_2, bone_attenuation_multiplier=1.0, orientation='PA', sid=500)
-subject_rlat = read(volume_dir_2, bone_attenuation_multiplier=1.0, orientation='RLAT', sid=500)
+# ================= 【 配置8个体素路径】 =================
+volume_dirs = [
+    r"data/voxel_data/spine107_img.nii.gz",
+    r"data/voxel_data/uniformed_liver_2.nii.gz",
+    r"data/voxel_data/uniformed_liver_3.nii.gz",
+    r"data/voxel_data/uniformed_liver_4.nii.gz",
+    r"data/voxel_data/uniformed_liver_5.nii.gz",
+    r"data/voxel_data/uniformed_liver_6.nii.gz",
+    r"data/voxel_data/uniformed_liver_7.nii.gz",
+    r"data/voxel_data/uniformed_liver_8.nii.gz",  # 确保有8个有效路径
+]
+num_volumes = len(volume_dirs)  # = 8
 
-drr_pa = DRR(
-    subject_pa,  # An object storing the CT volume, origin, and voxel spacing
-    sdd=800,  # Source-to-detector distance (i.e., focal length)
-    height=height,  # Image height (if width is not provided, the generated DRR is square)
-    delx=delx,  # Pixel spacing (in mm)
-    renderer="trilinear"
-).to(device)
-drr_rlat = DRR(
-    subject_rlat,  # An object storing the CT volume, origin, and voxel spacing
-    sdd=800,  # Source-to-detector distance (i.e., focal length)
-    height=height,  # Image height (if width is not provided, the generated DRR is square)
-    delx=delx,  # Pixel spacing (in mm)
-    renderer="trilinear"
-).to(device)
+# ================= 【3. 预加载所有体素的DRR生成器 + 标准图】 =================
+print(f"Loading {num_volumes} volumes and pre-generating standard images...")
+
+# 存储结构: {view_type: [drr_gen_0, drr_gen_1, ..., drr_gen_7]}
+drr_generators = {'PA': [], 'RLAT': []}
+# 存储结构: {view_type: [std_img_0, std_img_1, ..., std_img_7]}, 每个 [1, 1, H, W]
+standard_images = {'PA': [], 'RLAT': []}
+
+for vol_idx, volume_dir in enumerate(volume_dirs):
+    # 读取体素数据（两个视角）
+    subject_pa = read(volume_dir, bone_attenuation_multiplier=1.0, orientation='PA', sid=500)
+    subject_rlat = read(volume_dir, bone_attenuation_multiplier=1.0, orientation='RLAT', sid=500)
+
+    # 创建DRR生成器
+    drr_pa = DRR(subject_pa, sdd=800, height=height, delx=delx, renderer="trilinear").to(device)
+    drr_rlat = DRR(subject_rlat, sdd=800, height=height, delx=delx, renderer="trilinear").to(device)
+    drr_generators['PA'].append(drr_pa)
+    drr_generators['RLAT'].append(drr_rlat)
+
+    # 预生成标准参考图像（零变换，零平移）
+    rot_clean = torch.zeros(1, 3, device=device)
+    trans_clean = torch.zeros(1, 3, device=device)
+
+    # PA标准图
+    img_pa_clean = drr_pa(rot_clean, trans_clean, parameterization="euler_angles",
+                          convention="ZXY", degrees=True)
+    img_pa_clean = norm_img(img_pa_clean)
+    if img_pa_clean.dim() == 3:
+        img_pa_clean = img_pa_clean.unsqueeze(1)  # [1, 1, H, W]
+    standard_images['PA'].append(img_pa_clean)
+
+    # RLAT标准图
+    img_rlat_clean = drr_rlat(rot_clean, trans_clean, parameterization="euler_angles",
+                              convention="ZXY", degrees=True)
+    img_rlat_clean = norm_img(img_rlat_clean)
+    if img_rlat_clean.dim() == 3:
+        img_rlat_clean = img_rlat_clean.unsqueeze(1)  # [1, 1, H, W]
+    standard_images['RLAT'].append(img_rlat_clean)
+
+    print(f"  ✓ Volume {vol_idx + 1}/{num_volumes} loaded")
+
+print("✓ All volumes and standard images pre-loaded.\n")
 
 
 # 联合模型
-model = GridModel(model_config=global_config['model_config'], num_classes=6).to(device)
+model = GridModel(model_config=global_config['model_config'], num_classes=6, in_channel=2).to(device)
 optimizer = optim.Adam(model.parameters(), lr=global_config["lr"])
 # scheduler = ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=200)
 scheduler = ReduceLROnPlateau(
@@ -183,8 +220,9 @@ scheduler = ReduceLROnPlateau(
     min_lr=min_lr,  # ← 设置下限，防止过小
 )
 
+
 # ===  统一配置保存路径 ===
-base_checkpoint_dir = "checkpoints_all_models"
+base_checkpoint_dir = "mix3_mul_vox_model"
 os.makedirs(base_checkpoint_dir, exist_ok=True)
 
 # 子目录：每个模型独立文件夹（便于管理）
@@ -196,67 +234,120 @@ os.makedirs(checkpoint_dir_mix, exist_ok=True)
 max_steps = global_config['max_steps']
 pts = sample_cube_points(3).to(device)
 
-# 确保 batch_size 是偶数
-assert batch_size % 2 == 0, "Batch size must be even to split 50/50"
 half_batch = batch_size // 2
-
 
 losses_mix = []
 best_loss_mix = float('inf')
 
-
 # 日志打印频率
 log_interval = global_config.get('log_interval', 100)  # 默认每 100 步打印一次
 
-for i in range(1):
+for i in range(max_steps):
 
-    # --- PA 视角部分 ---
+    # ========== 【PA视角部分：8个体素，每个生成1张噪声图】 ==========
     rot_noise_pa = torch.empty(half_batch, 3, device=device).uniform_(-1.0, 1.0)
     trans_noise_pa = torch.empty(half_batch, 3, device=device).uniform_(-1.0, 1.0)
-
     rotations_pa = rot_noise_pa * rota_range_t
     translations_pa = trans_noise_pa * trans_range_t
 
-    rot_pa,trans_pa = get_transformer_noise(rotations_pa, translations_pa, R_ct2osz)
-    label_rot_pa, label_trans_pa = norm_label(rot_pa, trans_pa)
+    # 为PA部分随机分配体素索引（0~7，可重复采样）
+    vol_indices_pa = torch.randint(0, num_volumes, (half_batch,), device=device)
 
-    img_pa = drr_pa(
-        rotations_pa,
-        translations_pa,
-        parameterization="euler_angles", convention="ZXY", degrees=True
-    )
-    img_pa = norm_img(img_pa)
-    label_pa = torch.cat([label_rot_pa,label_trans_pa], dim=1)  # [8, 6]
+    img_pa_noisy_list = []
+    label_pa_list = []
 
-    # --- RLAT 视角部分 ---
+    for b in range(half_batch):
+        vol_idx = vol_indices_pa[b].item()
+        drr_pa = drr_generators['PA'][vol_idx]
+
+        # 生成单张噪声图像 [1, H, W] → [1, 1, H, W]
+        img_noisy = drr_pa(
+            rotations_pa[b:b + 1], translations_pa[b:b + 1],
+            parameterization="euler_angles", convention="ZXY", degrees=True
+        )
+        img_noisy = norm_img(img_noisy)
+        if img_noisy.dim() == 3:
+            img_noisy = img_noisy.unsqueeze(1)
+        img_pa_noisy_list.append(img_noisy)
+
+        # 生成对应标签
+        rot_pa, trans_pa = get_transformer_noise(
+            rotations_pa[b:b + 1], translations_pa[b:b + 1], R_ct2osz
+        )
+        label_rot_pa, label_trans_pa = norm_label(rot_pa, trans_pa)
+        label_pa_list.append(torch.cat([label_rot_pa, label_trans_pa], dim=1))
+
+    img_pa_noisy = torch.cat(img_pa_noisy_list, dim=0)  # [8, 1, H, W]
+    label_pa = torch.cat(label_pa_list, dim=0)  # [8, 6]
+
+    # 获取对应的标准图像（按vol_indices_pa索引）
+    img_pa_clean = torch.cat(
+        [standard_images['PA'][idx] for idx in vol_indices_pa], dim=0
+    )  # [8, 1, H, W]
+
+    # ========== 【RLAT视角部分：8个体素，每个生成1张噪声图】 ==========
     rot_noise_rlat = torch.empty(half_batch, 3, device=device).uniform_(-1.0, 1.0)
     trans_noise_rlat = torch.empty(half_batch, 3, device=device).uniform_(-1.0, 1.0)
-
     rotations_rlat = rot_noise_rlat * rota_range_t
     translations_rlat = trans_noise_rlat * trans_range_t
 
-    rot_rlat, trans_rlat = get_transformer_noise(rotations_rlat, translations_rlat, R_ct2osc)
-    label_rot_rlat, label_trans_rlat = norm_label(rot_rlat, trans_rlat)
+    vol_indices_rlat = torch.randint(0, num_volumes, (half_batch,), device=device)
 
-    img_rlat = drr_rlat(
-        rotations_rlat,
-        translations_rlat,
-        parameterization="euler_angles", convention="ZXY", degrees=True
-    )
-    img_rlat = norm_img(img_rlat)
-    label_rlat = torch.cat([label_rot_rlat, label_trans_rlat], dim=1)  # [8, 6]
+    img_rlat_noisy_list = []
+    label_rlat_list = []
 
-    # --- 混合模型数据：拼接 + 打乱 ---
-    img_mix = torch.cat([img_pa, img_rlat], dim=0)  # [16, H, W]
-    label_mix = torch.cat([label_pa, label_rlat], dim=0)  # [16, 6]
+    for b in range(half_batch):
+        vol_idx = vol_indices_rlat[b].item()
+        drr_rlat = drr_generators['RLAT'][vol_idx]
+
+        img_noisy = drr_rlat(
+            rotations_rlat[b:b + 1], translations_rlat[b:b + 1],
+            parameterization="euler_angles", convention="ZXY", degrees=True
+        )
+        img_noisy = norm_img(img_noisy)
+        if img_noisy.dim() == 3:
+            img_noisy = img_noisy.unsqueeze(1)
+        img_rlat_noisy_list.append(img_noisy)
+
+        rot_rlat, trans_rlat = get_transformer_noise(
+            rotations_rlat[b:b + 1], translations_rlat[b:b + 1], R_ct2osc
+        )
+        label_rot_rlat, label_trans_rlat = norm_label(rot_rlat, trans_rlat)
+        label_rlat_list.append(torch.cat([label_rot_rlat, label_trans_rlat], dim=1))
+
+    img_rlat_noisy = torch.cat(img_rlat_noisy_list, dim=0)  # [8, 1, H, W]
+    label_rlat = torch.cat(label_rlat_list, dim=0)  # [8, 6]
+
+    img_rlat_clean = torch.cat(
+        [standard_images['RLAT'][idx] for idx in vol_indices_rlat], dim=0
+    )  # [8, 1, H, W]
+
+    # ========== 【数据拼接：构建双通道输入】 ==========
+    # 1. 噪声图拼接 [16, 1, H, W]
+    img_noisy_mix = torch.cat([img_pa_noisy, img_rlat_noisy], dim=0)
+
+    # 2. 标准图拼接 [16, 1, H, W]（与噪声图一一对应）
+    img_clean_mix = torch.cat([img_pa_clean, img_rlat_clean], dim=0)
+
+    # 3. 标签拼接 [16, 6]
+    label_mix = torch.cat([label_pa, label_rlat], dim=0)
+
+    # 4. 随机打乱（保持噪声图↔标准图↔标签的对应关系）
     shuffle_idx = torch.randperm(batch_size, device=device)
-    img_mix = img_mix[shuffle_idx]
+    img_noisy_mix = img_noisy_mix[shuffle_idx]
+    img_clean_mix = img_clean_mix[shuffle_idx]
     label_mix = label_mix[shuffle_idx]
 
-    # ================= 模型 1: 混合视角训练 =================
+    # 5. 通道拼接 → 双通道输入 [16, 2, H, W]
+    input_dual_channel = torch.cat([img_noisy_mix, img_clean_mix], dim=1)
+
+    # ========== 【模型前向 + 反向传播】 ==========
     model.train()
-    output_mix = model(img_mix)
-    loss_mix = get_mse_loss(global_config, label_transformer_mix, label_mix, output_mix, pts)
+    output_mix = model(input_dual_channel)  # [16, 6]
+
+    loss_mix = get_mse_loss(
+        global_config, label_transformer_mix, label_mix, output_mix, pts
+    )
     loss_mix_val = loss_mix.item()
 
     optimizer.zero_grad()
@@ -264,8 +355,8 @@ for i in range(1):
     torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
     optimizer.step()
     scheduler.step(loss_mix_val)
-    losses_mix.append(loss_mix_val)
 
+    losses_mix.append(loss_mix_val)
 
     # ================= 定期输出训练指标 =================
     if (i + 1) % log_interval == 0 or (i + 1) == max_steps:

@@ -11,8 +11,8 @@ from grid_efficientnet.grid_efficientb0_model import GridModel
 from projector.drr import DRR
 from projector.read_data import read
 from projector.pose import convert
-from registration.label_transform_mix_2 import LabelTransformMix2
-from registration.math_process.get_noise_label import get_transformer_noise, get_transformer_noise_vector
+from label_transform_mix_2 import LabelTransformMix2
+from math_process.get_noise_label import get_transformer_noise, get_transformer_noise_vector
 
 
 def norm_img(img):
@@ -51,7 +51,7 @@ def norm_label(rot_noise, trans_noise):
     return rot_norm, trans_norm
 def init_config():
     return {
-        "batch_size": 4,
+        "batch_size": 16,
         "lr": 5e-4,
         "device": "cuda" if torch.cuda.is_available() else "cpu",
         "delx": 0.469,
@@ -150,7 +150,8 @@ delx = global_config['delx']
 batch_size = global_config['batch_size']
 
 label_transformer_mix = LabelTransformMix2(global_config['norm_params'])
-volume_dir_2 = r"../data/voxel_data/spine107_img.nii.gz"
+# volume_dir_2 = r"data/voxel_data/spine107_img.nii.gz"
+volume_dir_2 = r"data/voxel_data/uniformed_liver_6.nii.gz"
 
 subject_pa = read(volume_dir_2, bone_attenuation_multiplier=1.0, orientation='PA', sid=500)
 subject_rlat = read(volume_dir_2, bone_attenuation_multiplier=1.0, orientation='RLAT', sid=500)
@@ -172,7 +173,7 @@ drr_rlat = DRR(
 
 
 # 联合模型
-model = GridModel(model_config=global_config['model_config'], num_classes=6).to(device)
+model = GridModel(model_config=global_config['model_config'], num_classes=6, in_channel=2).to(device)
 optimizer = optim.Adam(model.parameters(), lr=global_config["lr"])
 # scheduler = ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=200)
 scheduler = ReduceLROnPlateau(
@@ -182,9 +183,32 @@ scheduler = ReduceLROnPlateau(
     patience=patience,  # ← 从 1 改为 200，给模型更多收敛时间
     min_lr=min_lr,  # ← 设置下限，防止过小
 )
+# ================= 【关键优化】预生成标准参考图像 =================
+
+# PA 标准图 (零变换)
+rot_pa_clean = torch.zeros(1, 3, device=device)  # [1, 3]
+trans_pa_clean = torch.zeros(1, 3, device=device)  # [1, 3]
+img_pa_clean = drr_pa(rot_pa_clean, trans_pa_clean, parameterization="euler_angles", convention="ZXY", degrees=True)
+img_pa_clean = norm_img(img_pa_clean)  # [1, H, W] 或 [1, 1, H, W]
+
+# RLAT 标准图 (零变换)
+rot_rlat_clean = torch.zeros(1, 3, device=device)
+trans_rlat_clean = torch.zeros(1, 3, device=device)
+img_rlat_clean = drr_rlat(rot_rlat_clean, trans_rlat_clean, parameterization="euler_angles", convention="ZXY", degrees=True)
+img_rlat_clean = norm_img(img_rlat_clean)  # [1, H, W] 或 [1, 1, H, W]
+
+# 确保通道维度 [1, 1, H, W]
+if img_pa_clean.dim() == 3:
+    img_pa_clean = img_pa_clean.unsqueeze(1)
+if img_rlat_clean.dim() == 3:
+    img_rlat_clean = img_rlat_clean.unsqueeze(1)
+
+# # 扩展到 batch_size 维度，方便后续拼接 [B, 1, H, W]
+# img_pa_clean_batch = img_pa_clean.expand(batch_size, -1, -1, -1).contiguous()
+# img_rlat_clean_batch = img_rlat_clean.expand(batch_size, -1, -1, -1).contiguous()
 
 # ===  统一配置保存路径 ===
-base_checkpoint_dir = "checkpoints_all_models"
+base_checkpoint_dir = "mix3_diff_uliver6_model"
 os.makedirs(base_checkpoint_dir, exist_ok=True)
 
 # 子目录：每个模型独立文件夹（便于管理）
@@ -208,7 +232,7 @@ best_loss_mix = float('inf')
 # 日志打印频率
 log_interval = global_config.get('log_interval', 100)  # 默认每 100 步打印一次
 
-for i in range(1):
+for i in range(max_steps):
 
     # --- PA 视角部分 ---
     rot_noise_pa = torch.empty(half_batch, 3, device=device).uniform_(-1.0, 1.0)
@@ -220,13 +244,14 @@ for i in range(1):
     rot_pa,trans_pa = get_transformer_noise(rotations_pa, translations_pa, R_ct2osz)
     label_rot_pa, label_trans_pa = norm_label(rot_pa, trans_pa)
 
-    img_pa = drr_pa(
+    img_pa_noisy = drr_pa(
         rotations_pa,
         translations_pa,
         parameterization="euler_angles", convention="ZXY", degrees=True
     )
-    img_pa = norm_img(img_pa)
+    img_pa_noisy = norm_img(img_pa_noisy)
     label_pa = torch.cat([label_rot_pa,label_trans_pa], dim=1)  # [8, 6]
+
 
     # --- RLAT 视角部分 ---
     rot_noise_rlat = torch.empty(half_batch, 3, device=device).uniform_(-1.0, 1.0)
@@ -238,24 +263,45 @@ for i in range(1):
     rot_rlat, trans_rlat = get_transformer_noise(rotations_rlat, translations_rlat, R_ct2osc)
     label_rot_rlat, label_trans_rlat = norm_label(rot_rlat, trans_rlat)
 
-    img_rlat = drr_rlat(
+    img_rlat_noisy = drr_rlat(
         rotations_rlat,
         translations_rlat,
         parameterization="euler_angles", convention="ZXY", degrees=True
     )
-    img_rlat = norm_img(img_rlat)
+    img_rlat_noisy = norm_img(img_rlat_noisy)
     label_rlat = torch.cat([label_rot_rlat, label_trans_rlat], dim=1)  # [8, 6]
 
-    # --- 混合模型数据：拼接 + 打乱 ---
-    img_mix = torch.cat([img_pa, img_rlat], dim=0)  # [16, H, W]
-    label_mix = torch.cat([label_pa, label_rlat], dim=0)  # [16, 6]
+    # 计算图像差值
+    img_pa_diff = img_pa_noisy - img_pa_clean
+    img_rlat_diff = img_rlat_noisy - img_rlat_clean
+
+    # ================= 数据拼接与处理 =================
+
+    # 1. 拼接 Batch 维度 (PA + RLAT)
+    img_noisy_mix = torch.cat([img_pa_noisy, img_rlat_noisy], dim=0)  # [B, 1, H, W]
+
+    # 2. 拼接标准图像 (从预生成的批次中取用)
+    # 前 half_batch 用 PA 标准图，后 half_batch 用 RLAT 标准图
+    img_diff_mix = torch.cat([img_pa_diff, img_rlat_diff], dim=0)  # [B, 1, H, W]
+
+    # 3. 标签拼接
+    label_pa = torch.cat([label_rot_pa, label_trans_pa], dim=1)
+    label_rlat = torch.cat([label_rot_rlat, label_trans_rlat], dim=1)
+    label_mix = torch.cat([label_pa, label_rlat], dim=0)  # [B, 6]
+
+    # 4. 打乱顺序 (保持噪声图和标准图对应关系一致)
     shuffle_idx = torch.randperm(batch_size, device=device)
-    img_mix = img_mix[shuffle_idx]
+    img_noisy_mix = img_noisy_mix[shuffle_idx]
+    img_diff_mix = img_diff_mix[shuffle_idx]  # 标准图也要同步打乱
     label_mix = label_mix[shuffle_idx]
 
-    # ================= 模型 1: 混合视角训练 =================
+    # 5. 通道拼接：形成双通道输入 [B, 2, H, W]
+    input_dual_channel = torch.cat([img_noisy_mix, img_diff_mix], dim=1)
+
+
+    # ================= 模型训练 =================
     model.train()
-    output_mix = model(img_mix)
+    output_mix = model(input_dual_channel)
     loss_mix = get_mse_loss(global_config, label_transformer_mix, label_mix, output_mix, pts)
     loss_mix_val = loss_mix.item()
 

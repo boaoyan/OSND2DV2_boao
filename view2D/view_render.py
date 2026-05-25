@@ -41,7 +41,7 @@ class ViewRender:
         self.qt_view.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.qt_view.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.qt_view.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
-        self.qt_view.setFixedSize(600, 600)  # 强烈建议同时设置固定大小
+        self.qt_view.setFixedSize(800, 800)  # 强烈建议同时设置固定大小
         # section 1 在控件中添加场景
         self.qt_scene = QGraphicsScene()
         self.qt_view.setScene(self.qt_scene)

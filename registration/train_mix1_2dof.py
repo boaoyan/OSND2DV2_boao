@@ -7,12 +7,11 @@ import torch.nn.functional as F
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 
 from grid_efficientnet.grid_efficientb0_model import GridModel
-
+from label_transform_mix import LabelTransformMix
 from projector.drr import DRR
 from projector.read_data import read
 from projector.pose import convert
 from registration.label_transform_mix_2 import LabelTransformMix2
-from registration.math_process.get_noise_label import get_transformer_noise, get_transformer_noise_vector
 
 
 def norm_img(img):
@@ -31,27 +30,10 @@ def norm_img(img):
     img_norm = img_norm.view(B, C, H, W)  # [B, 1, 512, 512]
     return img_norm
 
-def norm_label(rot_noise, trans_noise):
-    """
-    噪声归一化
-    输入:
-        rot_noise: (B, 3) tensor, 度
-        trans_noise: (B, 3) tensor, 单位 (mm/m)
-    输出:
-        rot_norm: (B, 3) tensor, 归一化后
-        trans_norm: (B, 3) tensor, 归一化后
-    """
-    device = rot_noise.device
-    rot_coef = rot_norm_coef.to(device)
-    trans_coef = trans_norm_coef.to(device)
 
-    rot_norm = rot_noise / rot_coef
-    trans_norm = trans_noise / trans_coef
-
-    return rot_norm, trans_norm
 def init_config():
     return {
-        "batch_size": 4,
+        "batch_size": 16,
         "lr": 5e-4,
         "device": "cuda" if torch.cuda.is_available() else "cpu",
         "delx": 0.469,
@@ -65,58 +47,90 @@ def init_config():
         "max_saved_model_num": 5,
         "val_steps": 25,
         "max_steps": 20000,
-        "R_ct2osz":[[-1, 0, 0, 0],
-                    [0, 0, 1, 0],
-                    [0, 1, 0, 0],
-                    [0, 0, 0, 1]],
-        "R_ct2osc":[[0, -1, 0, 0],
-                    [0, 0, 1, 0],
-                    [-1, 0, 0, 0],
-                    [0, 0, 0, 1]],
         "model_config": {
             'edffn': 1,
             'eca': 0,
             'conv_mlp': 0
         },
         "noise_params": {
-            'trans_noise_range': [25, 25, 25],
-            'rota_noise_range': [5, 5, 5]
+            'trans_noise_range': [25, 25, 0],
+            'rota_noise_range': [0, 0, 0]
         },
-        "norm_params":{
-            'trans_noise_norm':[25, 25, 25],
-            'rota_noise_norm':[10, 10, 10]
+        "norm_params": {
+            'trans_noise_norm': [25, 25, 25],
+            'rota_noise_norm': [1, 1, 1]
         }
     }
 
 
-def get_mse_loss(config, label_transformer_mix, labels, outputs, pts):
-    # 1️⃣ 获取 pts 的设备（作为基准设备）
-    device = outputs.device  # ← 以模型输出为基准（通常在 GPU）
-    pts = pts.to(device)  # ← 确保 pts 在同一设备
+# def get_mse_loss(config, label_transformer_mix, labels, outputs, pts):
+#     # 1️⃣ 获取 pts 的设备（作为基准设备）
+#     device = outputs.device  # ← 以模型输出为基准（通常在 GPU）
+#     pts = pts.to(device)  # ← 确保 pts 在同一设备
+#
+#     pre_rota, pre_trans = label_transformer_mix.label2real(outputs)
+#     tru_rota, tru_trans = label_transformer_mix.label2real(labels)
+#
+#     # 2️⃣ 转换得到 pose 对象
+#     tru_pose = convert(tru_rota, tru_trans, parameterization="euler_angles", convention="ZXY", degrees=True)
+#     pre_pose = convert(pre_rota, pre_trans, parameterization="euler_angles", convention="ZXY", degrees=True)
+#
+#     # 3️⃣ 🔥 关键修复：将 rotation 和 translation 迁移到 pts 同一设备
+#     tru_rotation = tru_pose.rotation.mT.to(device)
+#     pre_rotation = pre_pose.rotation.mT.to(device)
+#     tru_translation = tru_pose.translation.to(device)
+#     pre_translation = pre_pose.translation.to(device)
+#
+#     # 4️⃣ 执行矩阵运算（现在所有张量都在同一设备）
+#     tru_pts = torch.matmul(tru_rotation, pts.T)
+#     pre_pts = torch.matmul(pre_rotation, pts.T)
+#
+#     # 5️⃣ 计算损失
+#     trans_loss = F.mse_loss(tru_translation, pre_translation)
+#     loss = F.mse_loss(tru_pts, pre_pts) + trans_loss
+#     loss = config["weight_loss"] * loss
+#
+#     return loss
+def get_mse_loss_2dof(config, label_transformer, labels, outputs, pts,
+                      valid_trans_dims=[0, 1], valid_rot_dims=None):
+    """
+    valid_trans_dims: 有效的平移维度 [0]=X, [1]=Y, [2]=Z
+    valid_rot_dims: 有效的旋转维度，None表示完全忽略旋转loss
+    """
+    device = outputs.device
+    pts = pts.to(device)
 
-    pre_rota, pre_trans = label_transformer_mix.label2real(outputs)
-    tru_rota, tru_trans = label_transformer_mix.label2real(labels)
+    pre_rota, pre_trans = label_transformer.label2real(outputs)
+    tru_rota, tru_trans = label_transformer.label2real(labels)
 
-    # 2️⃣ 转换得到 pose 对象
-    tru_pose = convert(tru_rota, tru_trans, parameterization="euler_angles", convention="ZXY", degrees=True)
-    pre_pose = convert(pre_rota, pre_trans, parameterization="euler_angles", convention="ZXY", degrees=True)
+    # ✅ 平移loss：只计算有效维度
+    trans_loss = F.mse_loss(
+        tru_trans[:, valid_trans_dims],
+        pre_trans[:, valid_trans_dims]
+    )
 
-    # 3️⃣ 🔥 关键修复：将 rotation 和 translation 迁移到 pts 同一设备
-    tru_rotation = tru_pose.rotation.mT.to(device)
-    pre_rotation = pre_pose.rotation.mT.to(device)
-    tru_translation = tru_pose.translation.to(device)
-    pre_translation = pre_pose.translation.to(device)
+    # ✅ 旋转loss：可选弱化或完全忽略
+    if valid_rot_dims is not None and len(valid_rot_dims) > 0:
+        rot_loss = F.mse_loss(
+            tru_rota[:, valid_rot_dims],
+            pre_rota[:, valid_rot_dims]
+        ) * 1e-3  # 弱化权重
+    else:
+        rot_loss = torch.tensor(0.0, device=device)  # 完全忽略
 
-    # 4️⃣ 执行矩阵运算（现在所有张量都在同一设备）
-    tru_pts = torch.matmul(tru_rotation, pts.T)
-    pre_pts = torch.matmul(pre_rotation, pts.T)
+    # ✅ 点变换loss：使用零旋转 + 有效平移计算
+    zero_rot = torch.zeros_like(tru_rota)
+    ref_pose = convert(zero_rot, tru_trans, parameterization="euler_angles",
+                       convention="ZXY", degrees=True)
+    pred_pose = convert(zero_rot, pre_trans, parameterization="euler_angles",
+                        convention="ZXY", degrees=True)
 
-    # 5️⃣ 计算损失
-    trans_loss = F.mse_loss(tru_translation, pre_translation)
-    loss = F.mse_loss(tru_pts, pre_pts) + trans_loss
-    loss = config["weight_loss"] * loss
+    ref_pts = torch.matmul(ref_pose.rotation.mT.to(device), pts.T)
+    pred_pts = torch.matmul(pred_pose.rotation.mT.to(device), pts.T)
+    point_loss = F.mse_loss(ref_pts, pred_pts)
 
-    return loss
+    total_loss = config["weight_loss"] * (point_loss + trans_loss + rot_loss)
+    return total_loss
 
 
 def sample_cube_points(n, size=100):
@@ -137,11 +151,6 @@ rota_range_t = torch.tensor(
 trans_range_t = torch.tensor(
     noise_params['trans_noise_range'], dtype=torch.float32, device=device
 )
-norm_params = global_config['norm_params']
-rot_norm_coef = torch.tensor(norm_params['rota_noise_norm'], dtype=torch.float32, device=device)
-trans_norm_coef = torch.tensor(norm_params['trans_noise_norm'], dtype=torch.float32, device=device)
-R_ct2osz = torch.tensor(global_config['R_ct2osz'], dtype=torch.float32, device=device)
-R_ct2osc = torch.tensor(global_config['R_ct2osc'], dtype=torch.float32, device=device)
 
 patience = global_config['patience']
 min_lr = global_config['min_lr']
@@ -150,7 +159,7 @@ delx = global_config['delx']
 batch_size = global_config['batch_size']
 
 label_transformer_mix = LabelTransformMix2(global_config['norm_params'])
-volume_dir_2 = r"../data/voxel_data/spine107_img.nii.gz"
+volume_dir_2 = r"data/voxel_data/uniformed_liver_6.nii.gz"
 
 subject_pa = read(volume_dir_2, bone_attenuation_multiplier=1.0, orientation='PA', sid=500)
 subject_rlat = read(volume_dir_2, bone_attenuation_multiplier=1.0, orientation='RLAT', sid=500)
@@ -170,7 +179,6 @@ drr_rlat = DRR(
     renderer="trilinear"
 ).to(device)
 
-
 # 联合模型
 model = GridModel(model_config=global_config['model_config'], num_classes=6).to(device)
 optimizer = optim.Adam(model.parameters(), lr=global_config["lr"])
@@ -184,13 +192,12 @@ scheduler = ReduceLROnPlateau(
 )
 
 # ===  统一配置保存路径 ===
-base_checkpoint_dir = "checkpoints_all_models"
+base_checkpoint_dir = "mix1_2dof_uliver6_model"
 os.makedirs(base_checkpoint_dir, exist_ok=True)
 
 # 子目录：每个模型独立文件夹（便于管理）
-checkpoint_dir_mix = os.path.join(base_checkpoint_dir, "mix_view")
+checkpoint_dir_mix = os.path.join(base_checkpoint_dir, "mix1_view")
 os.makedirs(checkpoint_dir_mix, exist_ok=True)
-
 
 # === 初始化训练状态 ===
 max_steps = global_config['max_steps']
@@ -200,51 +207,40 @@ pts = sample_cube_points(3).to(device)
 assert batch_size % 2 == 0, "Batch size must be even to split 50/50"
 half_batch = batch_size // 2
 
-
+# 三个模型的 losses 记录列表
 losses_mix = []
-best_loss_mix = float('inf')
 
+# 三个模型的最佳 loss 记录
+best_loss_mix = float('inf')
 
 # 日志打印频率
 log_interval = global_config.get('log_interval', 100)  # 默认每 100 步打印一次
 
-for i in range(1):
+for i in range(max_steps):
 
     # --- PA 视角部分 ---
     rot_noise_pa = torch.empty(half_batch, 3, device=device).uniform_(-1.0, 1.0)
     trans_noise_pa = torch.empty(half_batch, 3, device=device).uniform_(-1.0, 1.0)
 
-    rotations_pa = rot_noise_pa * rota_range_t
-    translations_pa = trans_noise_pa * trans_range_t
-
-    rot_pa,trans_pa = get_transformer_noise(rotations_pa, translations_pa, R_ct2osz)
-    label_rot_pa, label_trans_pa = norm_label(rot_pa, trans_pa)
-
     img_pa = drr_pa(
-        rotations_pa,
-        translations_pa,
+        rot_noise_pa * rota_range_t,
+        trans_noise_pa * trans_range_t,
         parameterization="euler_angles", convention="ZXY", degrees=True
     )
     img_pa = norm_img(img_pa)
-    label_pa = torch.cat([label_rot_pa,label_trans_pa], dim=1)  # [8, 6]
+    label_pa = torch.cat([rot_noise_pa, trans_noise_pa], dim=1)  # [8, 6]
 
     # --- RLAT 视角部分 ---
     rot_noise_rlat = torch.empty(half_batch, 3, device=device).uniform_(-1.0, 1.0)
     trans_noise_rlat = torch.empty(half_batch, 3, device=device).uniform_(-1.0, 1.0)
 
-    rotations_rlat = rot_noise_rlat * rota_range_t
-    translations_rlat = trans_noise_rlat * trans_range_t
-
-    rot_rlat, trans_rlat = get_transformer_noise(rotations_rlat, translations_rlat, R_ct2osc)
-    label_rot_rlat, label_trans_rlat = norm_label(rot_rlat, trans_rlat)
-
     img_rlat = drr_rlat(
-        rotations_rlat,
-        translations_rlat,
+        rot_noise_rlat * rota_range_t,
+        trans_noise_rlat * trans_range_t,
         parameterization="euler_angles", convention="ZXY", degrees=True
     )
     img_rlat = norm_img(img_rlat)
-    label_rlat = torch.cat([label_rot_rlat, label_trans_rlat], dim=1)  # [8, 6]
+    label_rlat = torch.cat([rot_noise_rlat, trans_noise_rlat], dim=1)  # [8, 6]
 
     # --- 混合模型数据：拼接 + 打乱 ---
     img_mix = torch.cat([img_pa, img_rlat], dim=0)  # [16, H, W]
@@ -256,7 +252,7 @@ for i in range(1):
     # ================= 模型 1: 混合视角训练 =================
     model.train()
     output_mix = model(img_mix)
-    loss_mix = get_mse_loss(global_config, label_transformer_mix, label_mix, output_mix, pts)
+    loss_mix = get_mse_loss_2dof(global_config, label_transformer_mix, label_mix, output_mix, pts)
     loss_mix_val = loss_mix.item()
 
     optimizer.zero_grad()
@@ -265,7 +261,6 @@ for i in range(1):
     optimizer.step()
     scheduler.step(loss_mix_val)
     losses_mix.append(loss_mix_val)
-
 
     # ================= 定期输出训练指标 =================
     if (i + 1) % log_interval == 0 or (i + 1) == max_steps:
@@ -276,15 +271,12 @@ for i in range(1):
             grad_norm_mix = torch.norm(model.stem[0].weight.grad).item() if model.stem[
                                                                                 0].weight.grad is not None else 0.0
 
-
-
         print(f"\n{'=' * 60}")
         print(f"Step [{i + 1:6d}/{max_steps}]")
         print(f"{'-' * 60}")
         print(f" MIX_VIEW | Loss: {loss_mix_val:.6f} | LR: {optimizer.param_groups[0]['lr']:.2e} | "
               f"Out: {out_range_mix} | Grad: {grad_norm_mix:.4f}")
         print(f"{'=' * 60}\n")
-
     # ================= 保存最佳模型 =================
     # --- 混合模型 ---
     if loss_mix_val < best_loss_mix:
@@ -307,18 +299,15 @@ for i in range(1):
             lbl_range = f"[{label_mix.min().item():.4f}, {label_mix.max().item():.4f}]"
             grad_norm = torch.norm(model.stem[0].weight.grad).item() if model.stem[0].weight.grad is not None else 0.0
 
-        print(f"[MIX_VIEW]  NEW BEST at Step {i + 1}!")
+        print(f" [MIX_VIEW]  NEW BEST at Step {i + 1}!")
         print(f" Loss: {best_loss_mix:.8f} (↓{improvement:.2f}% vs prev best)")
         print(f" Output: {out_range} | Label: {lbl_range} | GradNorm: {grad_norm:.4f}")
-
-
-
-
 
     # ================= 定期保存中间检查点 =================
     if (i + 1) % global_config.get('save_interval', 1000) == 0 and (i + 1) < max_steps:
         # 混合模型
         torch.save(model.state_dict(), os.path.join(checkpoint_dir_mix, f"model_step_{i + 1}.pth"))
+
         print(f"💾 Checkpoint saved at step {i + 1}")
 
 # === 4. 训练结束：保存最终模型和日志 ===
